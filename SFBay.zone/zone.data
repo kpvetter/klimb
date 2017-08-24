@@ -1,0 +1,16 @@
+# KLIMB zone data, for more info see
+# http://www.klimb.org/klimb.html
+
+name=San Francisco Bay Area
+
+zone,map=Images/zone.png
+zone,coords=38 16 21.7 123 2 48.8 36 35 52.4 120 56 15
+#zone,map=Images/zone_big.png
+#zone,coords=38 16 21.7 123 2 48.8 36 52 46.6 121 17 20.6
+
+overview1,map=Images/overview.gif
+overview1,coords=38 15 00 123 02 00  36 52 30 121 15 04
+overview2,map=Images/overview2.gif
+overview2,coords=42 0 9  124 30 10   32 30 41 113 59 0
+
+multiple=1

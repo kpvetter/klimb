@@ -1,0 +1,1286 @@
+title: Table of Contents
+alias: TOC
+   - [Welcome to KLIMB]
+   - [Quick Guide]
+   - [Starting KLIMB]
+   - '''Zones and Regions'''
+     -- [Zones]
+     -- [Regions]
+   - '''Maps'''
+     -- [Scrolling the Map]
+     -- [Road and Node Information]
+     -- [Node List]
+     -- [Data Quality]
+   - '''Routes'''
+     -- [Creating Routes]
+     -- [Extending Routes]
+     -- [Route Description]
+     -- [Profile Graph]
+     -- [3D Profile]
+     -- [Arrows]
+     -- [Google Maps]
+     -- [Google Earth]
+     -- [Route Info]
+     -- [Mileposts]
+     -- [Trace Route]
+     -- [Hills]
+     -- [Route Turnings]
+     -- [Saving and Loading Routes]
+   - '''Creating Your Own Roads'''
+     -- [Creating New Nodes]
+     -- [Creating New Roads]
+     -- [Splitting Roads]
+     -- [Saving Your Work]
+   - '''Zoom'''
+     -- [Zoom]
+     -- [Bending Roads]
+     -- [Adding Elevations]
+   - [Gradients]
+   - [Photos]
+   - '''Printing'''
+     -- [Printing Maps]
+     -- [Snapshot]
+   - [Favorites]
+   - [Route Atlas]
+   - [GPS Support]
+     -- [GPS Tracks]
+     -- [GPX Export]
+   - [Ride Log]
+     -- [Ride Log Filter]
+     -- [Ride Log Statistics]
+   - '''Miscellaneous'''
+     -- [Customize]
+     -- [Options]
+     -- [Annotations]
+     -- [Region Info]
+     -- [Weather]
+     -- [Node Neighborhood]
+     -- [Points of Interest]
+     -- [Coordinate Locator]
+     -- [Geocaches]
+     -- [Calorie Calculator]
+     -- [Google]
+     -- [Superuser]
+   - '''Fun Stuff'''
+     -- [Bicycling Quotes]
+     -- [Picture Gallery]
+   - '''What's New'''
+     -- [Latest Version]
+     -- [Version 4.0]
+     -- [Version 3.06]
+     -- [Version 3.0]
+     -- [Version 2.0]
+-------------------
+title: Welcome to KLIMB
+alias: Overview
+'''KLIMB''' is program which allows you to plan bike routes
+interactively on topographical maps of the San Francisco Bay Area
+and other areas.
+Key intersections (nodes) and roads are marked on the map, and
+you can get information, such as altitude, distance and climbing
+about them.
+
+You create routes by clicking on nodes marking key intersections
+or on the links between the nodes (see [Creating Routes]).
+As you are building the route,
+the current distance, climbing and descending is displayed at
+the bottom of the window.
+At any time, with a press of the button,
+you can get a distance and altitude profile of the route or a detailed
+description of the current route.
+
+Originally KLIMB was only available for the San Francisco Bay Area. But
+now other areas such as central Ohio are available (see [Zones]).
+Each zone is divided into several smaller, more managable areas
+called [Regions]. For example, the Bay Area has regions like
+the Peninsula, South Bay, East Bay and Marin.
+-------------------
+title: Quick Guide
+Getting Started:
+    * Scroll around the map using the middle mouse button or scroll bars
+    * Create a route by:
+       - clicking on the starting node
+       - clicking on adjoining roads or nodes
+
+Once you have a route, you can:
+    * See its distance, climbing and descending statistics
+    * [Print] it out
+    * Create a [profile] graph
+    * Create a written [route description]
+    * Add [turn information] at each node
+    * Animate a [trace] of the route
+    * See all the [hills] on the route
+    * Add [annotations]
+-------------------
+title: Road and Node Information
+You can get information about a road or a node in several ways:
+   * hover the mouse over a road
+   * hover the mouse over a node
+   * double click on a road or a node
+
+The distance and climbing data comes from several sources.
+For the Bay Area, almost all the
+data comes from Bill Bushnell's Bay Area Atlas which he acquired by
+riding each road.
+For other zones some of the data is surveyed, but mostly it
+is gathered statically:
+node altitude comes from USGS topographical maps, road distance is
+a spherical trigometric calculation based on the roads route
+and climbing data is just an estimate
+based on the altitude difference of a road's end points and any
+intermediary waypoints. This
+estimated data is marked with a "?" to indicate its less accurate nature.
+
+People ask why do some roads follow the actual road but other roads
+are straight lines. The answer is lack of time.
+I call making a road follow its true course "bending" the road.
+Bending is easy and kind of fun, but there are a lot of roads.
+Volunteers "bent" many of
+the roads already, more volunteers are welcome--let me know if you want
+to help. Bending roads got a lot easier with the zoom feature.
+-------------------
+title: Scrolling the Map
+You can move to a different part of the map by:
+   * clacking and dragging the map with the mouse
+   * use the scrollbars
+   * use the mouse wheel (shift for horizontal scrolling)
+   * drag the small box in the overview window
+
+You can move to a particular node by:
+   * double clicking on a node on the [Profile Graph]
+   * double clicking on the node's name in the Node List window
+-------------------
+title: Data Quality
+
+The distance and climbing data for the San Francicso Bay Area zone
+comes from Bill Bushnell's Cycling Atlas which he gathered while
+riding the roads with his Avocet 50 altimeter bike computer, often
+riding the roads multiple times in both directions. In the Ohio zone,
+I've surveyed about a third of the roads with my Avocet 50 computer.
+The rest of the data are estimates--but often very accurately.
+
+Node altitudes are estimated by using USGS elevation web service.
+
+Road distances are estimated by computing the great circle distance
+between the end points. If the road is "bent" to follow its true
+course, then each small segment is summed producing a very accurate
+estimate.
+
+Climbing amounts are the hardest to get accurate. A basic estimate can
+be achieved by just computing the difference in altitude of the end
+nodes. While this will always be the less than or equal to the actual
+amount climbing, in practice this is fairly good because most roads
+have nodes at the bottom and top of their climbing sections.
+
+To achieve a better estimate, for some roads the altitude of points on
+the road are included in the climbing estimate. 
+
+In summary, the quality of the climbing data comes in the following degrees
+of accuracy:
+  1) road surveyed
+  2) road surveyed but only in one direction
+  3) mid-road altitude waypoints
+  4) end node altitude difference
+  5) unknown
+
+KLIMB will display roads with "bad" data in a distinct manner. What
+qualifies as "bad" is configurable by the zone creator. You can see
+this value in the [Options] dialog.
+-------------------
+title: Zones
+alias: zone
+Originally, KLIMB only covered SF Bay Area, but numerous people
+asked about getting KLIMB to work for other areas. Then I moved
+out of the Bay Area and I wanted KLIMB for my new location in
+central Ohio.
+
+To handle this, I introduced the concept of zones, which are just
+a bunch of regions that share a common overview map and multi-region
+selection map. You can change zones using the "Change Zone" command
+on the File menu.
+
+It is now well-defined and easy to create your own zones--email me
+for details.
+
+You can download more zones from the KLIMB web site at
+http://www.klimb.org.
+-------------------
+title: Regions
+alias: Region
+KLIMB divides up the current zone into several regions. This is because
+the loading all the maps at once would overwhelm the computer.
+
+You can change regions using the "Change Region" command on the File menu.
+You can also load multiple regions at once checking "Multiple Regions"
+button on the Advanced Region Selection dialog. (NB. combining regions
+may result in gaps in the map.)
+
+You can download more regions from the KLIMB web site at
+http://www.klimb.org.
+
+'''Did you know?'''
+   * You can set the region KLIMB starts in using the [Customize] feature.
+-------------------
+title: Routes
+Routes are the roads and nodes that your bike ride will go on. As you
+create a route, the current distance, climbing and descending is
+displayed at the bottom of the window.
+
+Once you've created the route, you can get information about it
+in several different ways.
+    * Profile: this shows you on a graph the climbing and descending on each leg
+    * Description: this is a written description of the route.
+    * Trace: this is an animation tracing out the route
+    * [Hills]: this finds and highlight hills on your route
+
+See also [Creating Routes] and [Saving and Loading Routes]
+-------------------
+title: Creating Routes
+To create a route:
+   * click on a node as the starting point
+   * extend the route by
+     1. clicking on an adjacent node
+     1. or clicking on a connecting road
+     1. or see [Extending Routes]
+
+See [Creating New Nodes] and [Creating New Roads] to see
+how you can create your own roads to add to your route.
+
+Don't forget to save your work! (see [Saving and Loading Routes]).
+
+'''Did you know?'''
+ * You can use [Route Turnings] specify which direction to turn at each node. 
+
+-------------------
+title: Route Turnings
+alias: turn information
+Route turnings allow you to be more specific about how a route behaves
+at a given intersection--turn right, left, go straight, u-turn, etc.
+This information will appear on the route description.
+
+By right clicking on a node in the current route and selecting
+''Route Turnings'', you can specify if the route should turn left or
+right, go straight, do a u-turn, etc.
+
+If you don't specify a route turning, KLIMB will try and guess. It
+uses the [arrow] information for its guess. This means if you turn off
+arrows, you turn off KLIMB trying to guess route turnings.
+
+If you select ''Omit from Route Description'', then that node will
+be omitted and the two incoming roads will be joined into one. This
+is helpful when your route traverses a long road which has numerous
+intersecting roads.
+
+'''Did you know?'''
+    * Toggling [arrows] toggles KLIMB guessing route turnings
+    * ''Omit from Route Description'' also omits it from the route profile.
+    * ''Omit from Route Description'' also removes its [arrow].
+-------------------
+title: Saving and Loading Routes
+Routes can be saved and loaded with the ''Save Route'' and ''Load Route''
+commands on the File menu.
+
+If the route contains any nodes and roads that you created yourself
+(see [Creating New Nodes] and [Creating New Roads]), 
+they will be saved and loaded
+with the route.
+
+Routes record which zone, region or multiple regions they were created in.
+You cannot load a route for a zone which isn't the current one.
+Also, you cannot load a route for a zone or region which you haven't downloaded.
+
+See also [Favorites] and [Creating Routes].
+-------------------
+title: Creating New Nodes
+To create a new node:
+   1. right click where you want the node to be--not on a road
+   1. select "Create New Node at Point"
+   1. fill in the information you know
+
+Don't forget to [save] your work!
+
+'''Did you know?'''
+ * You can use the [Zoom] feature to precisely position your new node.
+ * You can use the [USGS Elevation] feature to determine its elevation.
+ * You can use [Google] to see the location of the node.
+
+------
+title: Creating New Roads
+To create a new road:
+   1. right click anywhere not on a road or node
+   1. select "Create New Road"
+   1. fill in the information you know
+
+See [Bending Roads] to make the road follow its true course.
+
+Don't forget to [save] your work!
+
+'''Did you know?'''
+ * You can use the [Zoom] feature to [bend] your new road to match the \
+actual road course.
+ * You can use the [USGS Elevation] feature to determine the elevation for \
+points along the road.
+ * You can see the road on [Google].
+-----
+title: Splitting Roads
+
+Sometimes you want your route to diverge partway along an existing road.
+If so, you can ''split'' the road at that point creating a new node.
+
+To split a road
+   1. right click at the point on the road where you want the split
+   1. select "Split Road at Point"
+   1. fill in the information you know
+
+'''Did you know?'''
+ * You can use the [Zoom] feature to precisely position your new node.
+ * You can use the [USGS Elevation] feature to determine its elevation.
+
+------
+title: Saving Your Work
+alias: save
+
+You can save the nodes, roads and splits you've created by selecting
+"Save User Data" on the File menu. This will save the information
+to a file called "user.nodes" in the current zone directory.
+It will automatically get read whenever you run KLIMB and load that zone.
+
+See also [Saving and Loading Routes].
+-------------------
+title: Printing Maps
+alias: print
+
+For Windows users, KLIMB can print maps, profiles, zoomed maps
+and route descriptions. BUT I'm not letting you do it.
+
+Actually I'll let you do it in return for you doing something to
+improve KLIMB, such as filling in some missing data or bending
+roads to match their actual course. For details see the
+printing page on KLIMB's website (http://www.klimb.org/printing.html).
+
+If you need to print something larger than the current screen check 
+out the [Route Atlas] feature and the [Snapshot] feature
+
+For Unix users, you have to use the [Route Atlas] or [Snapshot] feature.
+-------------------
+title: Ride Log
+The Ride Log feature lets you keep a journal of all your rides.
+It will keep track of the route, the date, distance,
+time and other data. You can later view all you rides in the log
+in a table.
+
+To add to the Ride Log:
+   * select the Tools->Add to Ride Log menu entry
+   * fill in the form
+   * click the "Add to Log" button 
+
+To view the Ride Log entries:
+   * select the Tools->View Ride Log menu entry
+   * double clicking an entry will display the route
+   * [ride log filter] lets you restrict which rides are shown
+   * [ride log statistics] shows you simple statistics about all your rides
+
+'''Did you know?'''
+   * clicking on a column header sorts by that column.
+   * clicking twice on a column headers sorts in the reverse direction.
+-------------------
+title: Snapshot
+
+The snapshot feature lets you create jpeg or png images
+of the current screen or multiple adjacent screens. For
+multiple screens it will scroll the window to the
+correct location then take the snapshot. It then joins
+all the snapshots into one big image file.
+
+You can then use an external tool to view or print the snapshot.
+
+This feature requires the Img package. The Windows installation
+has it embedded but for other users you must download it by
+hand.
+-------------------
+title: Route Description
+The route description provides various forms of written descriptions
+of your current route.
+
+'''Formats'''
+    - ''Normal'': default verbose format.
+    - ''Running Totals'': same as normal but with cumulative statistics.
+    - ''Tab Delimited'': suitable for import into a spreadsheet.
+    - ''Space Delimited'': same as above but suitable for printing.
+    - ''Minimal'': most compact format.
+    - ''Google Earth'': suitable for import into Google Earth
+    - ''GPS Exchange'': an XML format for downloading to a GPS device.
+
+'''Did you know?'''
+   * You can edit the text in the description window.
+   * [Route Turnings] can make your route description more exact.
+   * You can [customize] which columns appear in the route description.
+-------------------
+title: Hills Dialog
+alias: hills
+The Hills Dialog finds and highlights all the hills on your route.
+You can specify how high or steep a hill must be to be highlighted.
+
+The accuracy of this data depends on the quality of the data
+for the roads in your route. If the roads have had [USGS elevation]
+information added to their waypoints then the data can be quite accurate.
+
+See also [Gradients].
+
+'''Did you know?'''
+    * You can highlight a particular hill by clicking on its entry in the list.
+    * Hovering over a hill will display its height and slope.
+    * Hills are also displayed on the [profile graph].
+    * [GPS Tracks] has a similar feature.
+----
+title: Latest Version
+
+Here are some additional features added since ''version 4.10''.
+
+'''Favorites'''
+
+[Favorites] provides quick and easy access to a list of
+your favorite rides. 
+
+'''Extend Route'''
+
+[Extend] your route to any node via the shortest possible path.
+
+___________________________________________________
+
+Here are some additional features added since [version 4.0].
+
+'''ROUTE ATLAS'''
+
+[Route Atlas] are a way of getting better, more detailed maps
+of your route.
+
+'''ARROWS'''
+
+[Arrows] option displays directional arrows at every intersection
+along your route.
+
+'''PDF'''
+
+You can now get your [profile graph], your [route description] and
+your [route atlas] saved in PDF file format.
+
+'''GRADIENTS'''
+
+You can calculate the gradient for any portion of a any road
+using the [Gradient] feature.
+-----
+title: What's New in Version 4.0
+alias: Version 4.0
+
+'''NEW MAPS'''
+
+The maps that KLIMB used originally for the San Francisco Bay Area had
+one fatal flaw: their latitude and longitude coordinates were
+inconsistent with both the USGS maps and with Google maps. So, if you
+used the [zoom] feature and [bent] a road to match its course exactly,
+it would be displayed on the master map incorrectly. Version 4.0 now
+only uses maps from USGS. (This means, however, you must download
+again all the regions you're interested in.)
+
+'''ELEVATIONS INFO FROM USGS'''
+
+The [USGS] offers a web service in which you can get the elevation for
+any point in the US (and parts of Canada, I believe). So now you 
+accurately determine the height of any node or waypoints along a road.
+
+'''HILLS'''
+
+The new elevation data from the USGS now enables you to see all
+the individual [hills] along your route, and to find out how much
+it climbs in how much distance.
+
+'''GOOGLE EARTH'''
+
+View your route on the globe with [Google Earth] or on a 
+flat map with Google Maps.
+
+'''ROUTE INFO'''
+
+Want to know the biggest climb on your route, or how about
+the highest point? The [Route Info] dialoge will show you
+this. In addition, you can use it to add [annotations] to
+your route.
+
+'''PROFILE LABELS'''
+
+The [Profile Graph] now has an option to display the node names.
+
+'''PROFILE 3D APPEARANCE'''
+
+The [Profile Graph] now has an optional sexier, 3D look to it.
+
+'''MILEPOSTS'''
+
+You can have [milepost] markers placed at intervals along your route.
+
+'''ROUTE DESCRIPTION COLUMNS'''
+
+You can now [configure] which columns appear in the [route description].
+
+'''ESTIMATED TIMES'''
+
+The [route description] will estimate at what time you'll arrive 
+at a different point given an average speed.
+
+'''WEATHER FORECAST'''
+
+You can get a 5-day forecast for the [weather] in your region.
+
+'''PICTURE GALLERY'''
+
+The [Picture Gallery] is a fun collection of some cycling photos.
+
+
+-------------------
+title: What's New in Version 3.06
+alias: Version 3.06
+
+'''PRETTIER'''
+
+KLIMB now uses a better looking widget set so everything should
+look better, especially buttons and the toolbar.
+
+'''BETTER DATA'''
+
+The road data base has been greatly improved with many more
+roads bent to follow their true course.
+
+'''SNAPSHOT'''
+
+You can capture the current screen or multiple adjacent screen
+into one large image file.
+
+'''GOOGLE'''
+
+You can view roads and nodes on a map with [Google].
+
+'''WHO NEEDS BENDING'''
+
+If you become superuser, then a new command appears on the
+view menu which will highlight all roads that still need
+bending.
+-------------------
+title: What's New in Version 3.0
+alias: Version 3.0
+
+'''PRINTING'''
+
+On Windows, you can now print out any maps, climbing profile,
+route description or zoom map. Printing out a map that you've
+added route annotions (see below) is really nice.
+
+'''ZOOM'''
+
+You can zoom in on any road, node, [poi], [geocache] or arbitrary
+location. It automatically downloads maps from the USGS terraserver,
+allowing you to zoom in to on any place on the map at up to
+1 pixel = .25 meter resolution.
+
+On the zoom map, you can bend roads or adjust the position
+of a node. You can also print out a zoom map.
+
+You must be connected to the internet to use this feature. KLIMB
+should be able to determine your proxy settings, if any.
+
+One problem is that KLIMB's large-scale maps don't use the same
+underlying coordinate system as the zoom maps, so places don't
+always line up correctly between the two.
+
+'''3-DIMENSION PROFILES'''
+
+Here's a really sexy new feature. You can display your route or
+track in a 3-dimensional view. You can then use your mouse to
+rotate or scale the view.
+
+This feature uses the program gnuplot. I've included a copy in the
+Windows distribution. For other platforms, you can download a copy
+from http://www.gnuplot.info/.
+
+'''ANNOTATIONS'''
+
+This feature lets you place labels or annotations on the map. You can
+add them for a single road or node or for all of them on a route.
+
+'''GPS SUPPORT'''
+
+I got a new toy, a GPS receiver, and wanted to make KLIMB work
+with it. Seeing your actual track on the map is really cool,
+especially KLIMB's feature of highlighting all the hills
+over a certain height and slope. KLIMB has GPS features for
+both before a ride and after a ride:
+   * save route as a GPX file that can be downloaded to the GPS receiver
+   * upload GPS tracks
+     - display tracks and waypoints
+     - compute total climbing (filtering out small fluctuations)
+     - show profile of the track
+     - find and highlight hills over a given height and slope
+
+
+'''MINOR CHANGES'''
+   * Geocaches
+     - Geocaches are another GPS oriented activity. KLIMB will load a \
+geocache file and display all the caches. You can also bring up the web page \
+associated with any geocache. See www.geocaching.com for details and the data \
+file to load into KLIMB.
+   * Region Info
+     - Dialog displaying region size, highest and lowest node, longest road, \
+etc.
+   * About Klimb dialog picture enhanced -- try right clicking on it.
+     - Try going to either the Stelvio or Gavia picture, view the large image \
+and drool
+   * Ridelog -- statistics and filtering
+     - You can now say show me all rides after March 24, 2004 that were \
+longer than 30 miles that went through node 120.
+   * Scale in the legend
+   * Fixed up some bad road data
+   * Route description wording slightly changed
+   * UTM maps: KLIMB understands maps in UTM format; no visible change for \
+the user, but this allows:
+     - zooming (see above)
+     - creating new zones using terraserver maps--I have tools to automate this
+   * Minor fix to profile graph ticks
+   * Better mouse wheel handling
+   * Automatically detect http proxy info
+-------------------
+title: What's New in Version 2.0
+alias: Version 2.0
+
+'''ZONES'''
+
+Many people have asked me if it is possible to have KLIMB for other
+areas, and then I moved to Ohio and wanted the same. So I added the
+concept of zones which are a collection of KLIMB regions. You can
+switch between zones at any time, and you can specify which zone to
+start in either by the Customize dialog or by using the -z command
+line switch. I've also created some zones for some of the East Bay
+hiking trails.
+
+'''INSTALLATION'''
+
+For Windows users there is a separate setup program for installing
+KLIMB. KLIMB will now appear on the start menu and, optionally, as a
+desktop icon and quick launch icon.
+
+'''POINTS OF INTEREST'''
+
+Places of interest, like where to find water or a covered bridge, are
+now marked on the map with a red star. I welcome people sending me addition
+places to include.
+
+'''SPLIT ROAD'''
+
+This features lets you split an existing road at a given spot into two
+roads. This greatly facilitates mapping your exact route. This
+seemingly simple function is actually quite tricky, especially in how
+it interacts with saving and loading routes.
+
+'''ZOOM OUT'''
+
+Any existing region can be shrunken to half its existing size. This is
+useful when you want to get a better overview and don't care so much
+about the details.
+
+'''COORDINATE LOCATOR'''
+
+This feature will locate the latitude and longitude position you enter.
+
+'''PRINTING TO POSTSCRIPT'''
+
+This is the start of the facility to print KLIMB routes. You select a
+portion of the map and KLIMB will save that as postscript, which you
+can then send to a printer using other tools. I know this isn't a
+great solution--it's slow and creates a huge postscript file, but it's
+a start. (A better solution still is to use a screen grabbing utility
+like IrfanView.)
+
+'''NODE NEIGHBORHOOD'''
+
+By right clicking on a node you can bring up the Node Neighborhood
+dialog. This dialog lets you do two things: first, find all nodes and
+roads that are within a specified distance of the selected node, and
+second, find the shortest route from that node to any other node.
+
+Also, when this dialog is up, the balloon help for any node will display
+the distance to the selected node.
+
+'''PROFILE GRAPH'''
+
+The profile graph now also displays accumulated feet climbed along the
+route.
+
+'''MISCELLANEOUS'''
+   * Route turnings now allow for zigzag turns
+   * Two new route description formats:
+          1. space-delimited -- like tab-delimited but it copies better to \
+text editor for printing
+          1. minimal -- just the bare-bones details
+   * Normal route description uses "about xx miles" when showing guessed data
+   * Multiple roads between the same nodes
+   * Unknown distances now better estimated via a technique using the great \
+circle between the points
+   * Many more bike quotes
+   * Several new dialog images, especially for the About dialog
+   * OptionMenu widget used for entries with fixed types, e.g. color selection
+   * Smaller font for node label (they should fit nicely now)
+   * Advanced selection for all magnification
+   * Legend window showing all the colors for all the different roads
+   * More road types: single track, fire break, paved fire road
+   * Zones can have their own RC file
+
+'''New in version 1.5'''
+   * Zones: map data is broken up into zones to allow KLIMB to work with \
+other areas
+   * Points Of Interest: places where water, food or bathrooms are available \
+and other interesting locations are marked with a star
+   * Printing: the beginnings of the ability to print maps
+   * Splits: an easy way to create a new node in an existing road
+   * New help system
+   * Multiple overview maps
+-----
+title: 3D Profile
+
+3D Profile allows you to view your route as a 3-dimensional graph using the
+external utility ''gnuplot''.
+I've included a copy in the
+Windows distribution. For other platforms, you can download a copy
+from http://www.gnuplot.info/.
+
+'''Did you know?'''
+   * In ''gnuplot'', holding down and moving the mouse button \
+lets you change the viewing angle.
+   * Also, holding down and moving the middle mouse button \
+lets you change the graph scale.
+------
+title: Google Maps
+
+This feature lets you view your route in a Google map embedded
+in a web page. A temporary web page is created on your machine
+and then viewed in a browser. Client side web code
+accesses Google's map web service to create the map and to
+display your route.
+
+------
+title: Google Earth
+
+The Google Earth feature lets you view your route in the free
+program Google Earth. The route gets converted into Google Earth's
+KML format. On Windows, you can elect to have the result run
+directly.
+------
+title: Route Info
+
+The Route Info dialog lets you view some statistics about your ride.
+In addition to distance and total climbing, you can see the biggest climb
+and descent, the highest and lowest points. You can also use this dialog
+to automatically add [annotations] along the route.
+
+ * To open Route Info, select ''Info'' off the Route menu.
+------
+title: Mileposts
+alias: milepost
+
+Mileposts button on the button bar toggles the display of markers
+at mileposts along the route.
+
+'''Did you know?'''
+ * You can [configure] the size, color and font of the mileposts.
+ * You can [configure] how far apart mileposts appear.
+
+------
+title: Trace Route
+alias: tracing
+alias: trace
+
+Trace route shows an animation of your route being traced. At any point
+in the animation, the current distance with total climbing and descending
+is displayed. Also, the estimated time to reach that point is shown for
+various average speeds.
+
+'''Did you know?'''
+ * The average speed fields are the same ones used by the [route description] \
+(which you can [customize]).
+ * Tracing animation is also done on the [profile] graph.
+------
+title: Profile Graph
+alias: Profile
+
+The Profile dialog shows the ups and downs of your route. It uses node
+elavations, road waypoint elevations and known climbing numbers for each
+road to produce the graph.
+
+For roads with [USGS elevation] information, the profile graph will be
+very accurate but for roads without this information, the data between
+the nodes is interpolated.
+
+''Accumulated Climbing'' shows you the climbing so far.
+
+See also [Gradients].
+
+'''Did you know?'''
+ * Double clicking on a node on the profile graph will highlight the \
+node in the main window.
+ * Tooltip information appears when hovering the mouse on the profile graph.
+ * [Hills] are highlighted on the profile graph.
+ * When [tracing] a route, the trace also occurs on the profile graph.
+ * You can configure the appearance of the graph.
+ * You can exclude nodes from the graph by using [Route Turnings].
+ * You can delete a label by right-clicking on it
+----
+title: Customize
+alias: configure
+
+The Customize dialog is found on the '''Tools''' menu. It lets you
+control the appearance of numerous aspects of program, from the color
+shown for various types of roads to the size of the nodes; from the font
+used in the help system to the size of the 3d profile graph.
+
+The values are stored in the file ''klimb.rc'' in the KLIMB directory.
+Zones can have customization specific to that zone, and these values
+are stored in the ''klimb.rc'' in that zone directory.
+
+'''Did you know?'''
+  * You can use customize to change show all values in meters and kilometers.
+  * You can specify which zone and region KLIMB should start in.
+----
+title: Options
+alias: Option
+
+The Options dialog lets you control some more esoteric aspects of KLIMB,
+some of which are only useful for people creating new zones. Two options,
+however, are useful to the general user: 
+
+ * ''Windows Association'' -- allows you to double-click on a KLIMB route \
+file and have it automatically launch KLIMB. 
+ * ''Zoom Cache'' -- displays the amount of disk space used by \
+the [zoom] cache, and optionally lets you empty the cache.
+----
+title: Weather
+
+The Weather dialog displays the weather forecast for the
+current region for the next five days. It gets is data by querying the
+NOAA website.
+----
+title: Node Neighborhood
+
+What's the shortest route from my house to the the top of the local
+big climb? Where can I get to from my house in just 10 miles?
+
+These questions can be answered with the ''Node Neighborhood'' dialog
+by right-clicking on a node and selecting the menu option.
+----
+title: Points of Interest
+alias: POI
+
+The red stars you see scattered on the map indicate some interesting location,
+such as where water can be found or some historic event occurred. 
+
+Hovering the mouse over the star will give you a short description and
+double clicking on it will bring up all the details. Some entries have
+web pages associated with them, and a button will appear letting you 
+bring up that page.
+
+'''Did you Know?'''
+ * You can see a list of all POI locations on the ''Node List''.
+----
+title: Geocaches
+alias: geocache
+
+Geocaching is fun, new activity where people use a GPS device to
+try and locate ''geocaches'' that others have hidden. Check out
+''http://www.geocaching.com/'' for details.
+
+The Geocache Dialog lets you view on the maps geocaches hidden in your
+region (you must download this information first). A geocache is marked by a
+magenta spoked circle. Double clicking on the symbol displays details
+of that cache, and provides a button to go directly to the 
+cache's webpage.
+
+'''Did you Know?'''
+ * You can see a list of all geocaches on the ''Node List''.
+----
+title: GPS Support
+
+KLIMB supports a GPS device in two ways. First, you can upload
+[GPS tracks] and see them displayed on the maps. Second, you
+can save a route in [GPX] format which you can download to your
+device.
+----
+title: GPX Export
+alias: GPX
+
+GPX Export is an XML based description of your current route. It is
+one of the formats available in the [Route Description] dialog. You
+can download it to your GPS device to provide directions for your next
+ride.
+----
+title: GPS Tracks
+
+GPS devices allow you to save and upload ''tracks'' of showing where
+you've been. KLIMB can read those file, and it will then display the track on
+the map, give you distance, climbing and other statistics and show you
+all the [hills].
+
+'''Did you know?'''
+ * A sample GPS track file is provided with KLIMB to let you play \
+with this feature.
+----
+title: Ride Log Statistics
+
+When the [ride log] is displayed, the ''Ride Log Statistics'' dialog
+displays some statistics for all the rides, such as total distance, 
+average ride length, longest ride, fastest speed, etc.
+
+If you have applied a [ride log filter], then the statistics are only
+for those rides matching the filter.
+----
+title: Ride Log Filter
+
+When the [ride log] is displayed, you can specify criteria for
+a ride to match to be displayed. For example, you can restrict
+only rides since a certain day, longer than a given distance,
+going through a specific node, traversing a specific road, etc.
+
+The ''Skip blank entries'' checkbox indicates whether a blank 
+field is considered a match or not.
+----
+title: Annotations
+
+Annotations are like yellow sticky-notes that you can add
+to the map. You can add your own annotations anywhere by
+right clicking on an empty part of the map and selecting
+''Add Annotation''. Alternatively, you can right clicking on node, 
+road, [POI], [geocache], etc. and add an annotation for that 
+object with its details already filled out.
+
+Clicking and dragging an annotation lets you move it to
+exactly where you want it. With shout-outs, clicking
+and dragging the annotation body keeps the anchor point
+intact while clicking and dragging on the shout out moves
+everything.
+
+Double-clicking on an annotation lets you edit, delete
+it or toggle the shout out arrow.
+
+'''Did you know?'''
+ * Both the [Route Info] and [Printing Maps] dialogs lets you \
+annotate your route and control exactly what appears in the text.
+ * You can click and drag on the shout out arrow to \
+move the anchor point.
+-----
+title: Google
+
+Right clicking on any object on the map and selecting
+''Google Maps'' will bring up the Google Maps web page
+for that location.
+
+''Note'', for roads, Google maps may not show the same route
+as KLIMB. If this happens, just try again--the second 
+attempt will add an intermediary waypoint.
+
+----
+title: Bicycling Quotes
+
+A list of bicycling quotes accumulated over the years is
+available off the ''Help'' Menu.
+----
+title: Picture Gallery
+
+The ''Picture Gallery'' presents thumbnails of a bunch of
+cycling pictures. Double-clicking on any image will bring
+up a larger version.
+
+If you have a good cycling picture you'd like to share let
+me know.
+
+'''Did you know?'''
+ * These pictures also appear on the ''About'' dialog.
+ * Try right clicking on the image in the ''About'' dialog.
+
+Kudos to anybody who can tell me what position Wim Van Est
+was in when he went tumbling into the ravine on the Col d'Aubisque.
+----
+title: Zoom
+
+You can zoom in on any road, node, [POI], [geocache] etc. at up
+to 1 pixel = .25 meters. KLIMB automatically connects to the USGS
+Terraserver website and downloads their maps for zooming. These
+maps can be topographic, black and white aerial or color aerial
+(the color maps presently cover about half the Bay Area but more
+are being added daily).
+
+The Zoom dialog lets you position nodes more precisely
+and to [bend] roads to their true course. A new feature lets
+you determine the [elevation] of a node or road route point.
+
+You can move around the zoom display by:
+ * using the scrollbars
+ * using the mousewheel (shift for horizontal)
+ * holding down the middle button and moving the mouse
+
+The left-hand column has controls to let you select the 
+type of map and level of zoom (not all levels are available
+for a given map type).
+
+'''Did you know?'''
+ * maps downloaded from the USGS are cached in the ''zoom/'' directory.
+ * the [Options] dialog shows the size of this cache and lets you clear it.
+
+----
+title: Bending Roads
+alias: bend
+alias: bent
+
+The [Zoom] dialog is where you can ''bend'' a road so that it
+follows its true course. You can only bend roads you've created
+(unless you've chosen the ''superuser'' [option]).
+
+You bend a road by adding ''route points'' through which the road
+passes. Figuring out exactly where to locate route points is a 
+balancing act.
+
+'''To create a route point:'''
+ * right click where you want it to go, and select ''Add New Route Point''
+ * shortcut: ctrl-right click
+
+'''To move a route point:'''
+ * click and drag the route point
+
+'''To delete a route point:'''
+ * right click on it and select ''Delete this Route Point''
+
+See also [Adding Elevations].
+----
+title: Adding Elevations
+alias: USGS Elevation
+alias: elevation
+alias: usgs
+
+The USGS recently added a web service that gives the
+altitude of any point in the US (and parts of Canada
+I'm told). 
+
+The service is available within KLIMB largely through
+the [Zoom] dialog. 
+
+After position a new node exactly where you want it, click on the
+"'''*'''" button and it will retrieve the elevation for that location.
+
+For roads that you've [bent], you can add elevation information for
+each route point either singly, by right clicking on the point, or
+for every route point, by clicking on the "'''*'''" button.
+
+With enough properly placed route points on a road, you can get a
+fairly accurate elevation profile for a road.
+
+'''CAVEAT''': roads which traverse the side of a mountain are notoriously
+hard to get proper elevations for. A slight error in placing a
+route point can yield big errors in elevation.
+
+----
+title: Coordinate Locator
+
+The ''Coordinate Locator'' dialog lets you locate a specific 
+point given its latitude and longitude position. You mark
+that position on the map, on [Google] or [zoom] into it.
+
+Also, while the ''Coordinate Locator'' dialog is up, as you
+move the mouse over the map, the latitude and longitude of
+the place the mouse is over is displayed in the status bar.
+
+'''Did you know?'''
+ * Holding down the shift-key and moving the mouse puts location back \
+into the dialog.
+ * If you have decimal latitude instead of degree, minutes, seconds just \
+enter 0 for minutes and seconds.
+----
+title: Region Info
+
+Every wanted to know the highest node in your region? or the longest
+road? or just how big the region is? The ''Region Info'' dialog provides 
+just that sort of information.
+
+'''Did you know?'''
+ * Clicking on the "'''*'''" button next to an entry will display \
+and highlight the qualifying road or node.
+
+----
+title: Node List
+
+The ''Node List'' displays a list of every node, [POI] and
+[geocache]. You can double click on an item and it will be
+highlighted.
+
+'''Did you know?'''
+ * Double clicking a ''Node List'' item will highlight it on the map.
+ * Nodes in the current route are highlighted on the ''Node List''.
+
+----
+title: Starting KLIMB
+
+To start KLIMB, simply double click on the KLIMB icon.
+
+'''Advanced Features'''
+
+ * To start KLIMB with a saved route
+ - klimb ''route file name''
+ * To start KLIMB in a particular [zone]
+ - klimb -z ''zone name''
+ * To ALWAYS start KLIMB in a particular [zone]
+ - Use [customize] to set the starting zone
+ * To start KLIMB in a particular [region]
+ - klimb -r ''region name''
+ - ''or'' klimb -z ''zone name'' -r ''region name''
+ * To ALWAYS start KLIMB in a particular [region]
+ - Use [customize] to set the starting region
+ * To start KLIMB with multiple regions
+       1. save a route from the multiple regions
+       1. klimb ''route file name''
+----
+title: Superuser
+
+Turning on ''superuser'' mode in the [Options] dialog provides 
+some extra rights to the user. These extra rights are mostly
+for people creating their own zones.
+
+One extra right is the
+ability to [bend] and modify existing roads. Another is a 
+special new menu with tools to show road and node data which
+is missing or inconsistent.
+----
+title: Photos
+
+The photos feature lets you link points on the map with
+a given web page. 
+
+To create a new photo marker, Right-click on the map where you want to 
+place it and select ''Create Photo''. Fill in the form and press 
+''Add Photo''. 
+
+You can update or delete a photo by right-clicking on it, and selecting
+''Update Photo''. Note, you cannot update or delete built-in photos 
+unless you are [superuser].
+----
+title: Route Atlas
+alias: Atlas
+
+The route atlas features lets you create precise, detailed
+maps of your bike route. You can closely control what part of the
+map to grab and, by using this with the [zoom] feature, at exactly
+what level of detail.
+
+Instead of grabbing the whole map, which may force the scale to be
+too small, you instead grab a set of smaller, more detailed maps.
+These are then joined together to form an atlas. 
+
+Clicking on the Atlas button causes a rectangular print selection
+box to be displayed on either the main map window, or the [zoom] map
+window if it is present.
+
+You can '''move''' (by dragging the box), '''resize''' (by moving the
+resize buttons), and '''rotate''' (by moving the resize box). In the
+zoom window, you can also zoom in and out to get the desired level of
+details. (NB. for rotation you need the xphoto extension which is only
+available on Windows.)
+
+Once you have the desired area selected, press the ''Take Snap Shot''
+button. You can then add an optional caption for the map. Repeat the
+process until you have all the maps you want. You can delete any maps
+that don't work or re-order them. 
+
+When you have all the maps you want, press the ''Save'' button to save
+them as either as a web page or as a PDF file.
+
+----
+title: Arrows
+alias: arrow
+
+Arrows are markups you can place on your map showing
+how to proceed at every intersections.
+
+Arrows may be added in two ways. First, turning on the arrow option
+will automatically add arrows at every node on your route. Second, 
+you can right click where you want an arrow, select ''Create Arrow''
+and bring up the Arrow Dialog. 
+
+'''Did you know?'''
+ * You can drag and move arrows.
+ * Double clicking on an arrow lets you tweak the arrow shape.
+ * Use [Route Turnings] and ''Omit from Route Description'' to remove an arrow \
+at an intersection.
+----
+title: Gradients
+alias: gradient
+
+There are two ways to compute the actual gradient for a hill. The
+first way is to use the [Hills Dialog], but that measures the entire
+hill. So if a hill has a long, gentle lead up, that gets included in
+the computation.
+
+The second way is to open the [Profile Graph] for the road. Next, use
+the mouse and click where you want to start the gradient calculation
+then drag to the end. The selection will be highlighted and the gradient
+will be calculated for it.
+----
+title: Favorites
+
+The Favorites Dialog provides quick and easy access to a list of
+your favorite rides. Clicking on any entry will load that route
+into KLIMB.
+
+ * To open favorites, click its button on the button bar.
+ * To add a route to your favorites, use the [Route Info] dialog.
+
+NB. only routes using default KLIMB nodes and roads can be
+added to your favorites.
+
+'''Did you know?'''
+   * clicking on a column header sorts by that column.
+   * clicking twice on a column headers sorts in the reverse direction.
+----
+title: Extending Routes
+alias: extend
+
+Extending routes provides a way to connect your route to a distant
+node. KLIMB will connect that node to your current route using the
+shortest possible route. 
+
+To extend a route:
+ * Start creating a route
+ * Right-click on a distant node
+ * Select ''Extend Route To''
+
+See also [Node Neighborhood].
+----
+title: Calorie Calculator
+
+Ever wonder how many calories you burned on your
+ride? The calorie calculator lets you know.
+
+This calculator is based on the Bike Power program by
+Ken Roberts and Mark Grennan. It is an extremely
+accurate model taking into account ride position,
+rolling resistance and air temperature.
+
+For more details, see http://www.grennan.com/BikePower/
+
+----
+title: foo
+
+shift-motion and coordinate locator
+node list highlight nodes on the route
+profile:
+  hills also highlighted
+  gradient feature
+  locate nodes on double click
+  trace 
+within: balloon help shows distance to node
+balloon help & ridelog info
+edit road/node shows ridelog stats
+moving via overview window
+date & count of every road ridden

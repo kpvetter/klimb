@@ -1,0 +1,82 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" 
+  xmlns:v="urn:schemas-microsoft-com:vml">
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8"/>
+    <title>KLIMB Bike Route</title>
+    <style type="text/css">v\:* { behavior:url(#default#VML); } </style>
+    <script src="http://maps.google.com/maps?file=api&amp;v=2&amp;key=ABQIAAAA03TXYyeZwtbHC0iHPwlQLxSViEb1mpVtIF9OMSyvMuIyIvCIThSxxg-tosAGWMut8UORxCS5wISI3w"
+      type="text/javascript"></script>
+    <script type="text/javascript">
+    //<![CDATA[
+    SUBSTITUTE_NODES_HERE
+    SUBSTITUTE_ROUTE_HERE
+    SUBSTITUTE_STATS_HERE
+    //]]>
+
+    //<![CDATA[
+
+    var map;
+    var sLat;
+    var sLon;
+    var sZoom = 13;
+    sLat = markers[0].lat;
+    sLon = markers[0].lon;
+
+    function init() {
+        if (! GBrowserIsCompatible()) return;
+        var loc = new GLatLng(sLat, sLon);
+        map = new GMap2(document.getElementById("map"));
+
+        //map.addControl(new GSmallMapControl());
+        //map.addControl(new GLargeMapControl());
+        map.addControl(new GLargeMapControl3D());
+        map.addControl(new GScaleControl());
+        //map.addControl(new GSmallZoomControl());
+        map.addMapType(G_PHYSICAL_MAP);
+        //map.addMapType(G_SATELLITE_3D_MAP); -- needs plugin
+        map.addControl(new GMapTypeControl());
+	map.addControl(new GOverviewMapControl())
+	map.enableScrollWheelZoom(); 
+        map.setCenter(loc, sZoom);
+
+        plotAllMarkers();      
+    }
+    function plotAllMarkers () {
+        for (id in markers) {
+            addMarker(markers[id].lat, markers[id].lon, markers[id].name);
+        }
+        var polyline = new GPolyline(route, "#ff0000", 6);
+        map.addOverlay(polyline);
+    }
+    function addMarker (lat, lon, txt) {
+        var marker = new GMarker(new GLatLng(lat, lon));
+        GEvent.addListener(marker, 'click',
+            function() {
+                marker.openInfoWindowHtml(txt);
+            }
+        );
+        map.addOverlay(marker);
+    }
+
+    window.onload = init;
+    window.onunload = GUnload;
+    //]]>
+    </script>
+  </head>
+  <body>
+     <center>
+     <h1><a href="http://www.klimb.org/klimb.html">KLIMB Bike Mapping Program</a></h1>
+     <h2>SUBSTITUTE_ZONE_HERE</h2>
+     SUBSTITUTE_TITLE_HERE
+     <div id="map" style="border-style: solid; border-width: 1px; width: 90%; height: 700px"></div>
+     <table width="90%">
+     <tr><td align=left>Distance: <script type="text/javascript"> document.write(dist) </script></td></tr>
+     <tr><td align=left>Climbing: <script type="text/javascript"> document.write(climb) </script></td></tr>
+     <tr><td align=left>Descending: <script type="text/javascript"> document.write(desc) </script></td>
+         <td align=right>Copyright &#169; <script type="text/javascript"> document.write(year) </script> <a href="http://www.klimb.org/klimb.html">www.klimb.org</a></td></tr>
+     </table>
+     </center>
+  </body>
+</html>

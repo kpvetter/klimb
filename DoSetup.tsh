@@ -1,0 +1,820 @@
+#!/usr/bin/env tclsh
+# -*- mode: tcl; tab-width: 8; -*-
+# Time-stamp: "2009-08-26 15:57:25"
+
+##+##########################################################################
+#
+# DoSetup -- builds are binary and zip files for distribution
+# by Keith Vetter
+#
+# Revisions:
+# KPV Oct 22, 2003 - initial revision
+# KPV Oct 28, 2003 - package up single regions
+#
+##+##########################################################################
+#############################################################################
+
+package require ftp
+
+set debug 0
+set C(bdir) k:/newWeb/binaries			;# Binary directory
+set C(zdir) k:/newWeb/zones			;# Zone directory
+set C(spdir) k:/starpack/klimb.vfs/lib
+set C(kname) [file join $C(bdir) klimb.exe]
+set C(kzname) [file join $C(bdir) klimb.zip]
+set C(iss) {c:\Program Files (x86)\Inno Setup 5\ISCC.exe}
+if {! [file exists $C(iss)]} {
+    puts stderr "cannot locate $C(iss)"
+}
+set C(star) "starpack/klimb.vfs/lib/app-klimb"
+set C(star2) "starpack/kmigrate.vfs/lib/app-kmigrate"
+set C(home) [pwd]
+set C(ftp) keithv.powweb.com
+set C(passwd) kkk420and7!
+
+set C(rtemplate) [string trim {
+; Created automatically by KLIMB DoSetup
+[Setup]
+AppId=Klimb
+Uninstallable=no
+DisableReadyPage=yes
+CreateUninstallRegKey=no
+
+[Setup]
+AppPublisherURL=http://purl.oclc.org/keithv/klimb/klimb.html
+AppSupportURL=http://purl.oclc.org/keithv/klimb/klimb.html
+AppUpdatesURL=http://purl.oclc.org/keithv/klimb/klimb.html
+DefaultDirName={pf}\Klimb
+DefaultGroupName=Klimb
+DisableStartupPrompt=yes
+UninstallDisplayIcon={app}\Images\klimb.ico
+WizardSmallImageFile=K:\setup\misc\Klimb.bmp
+DisableFinishedPage=yes
+
+[Messages]
+WelcomeLabel2=This will install [name/ver] as an additional module for the program Klimb.
+
+[Setup]
+}]
+
+##+##########################################################################
+# 
+# DoKlimb -- build klimb.exe in the binary directory
+# 
+proc DoKlimb {} {
+    global C
+
+    set bnum [GetBuildNumber]
+    INFO "building klimb.exe  build $bnum"
+    file delete $C(kname)
+
+    set pdir [file join $C(spdir) packages]
+    set idir [file join $C(star) Images]
+    
+    file mkdir $pdir
+    file mkdir $idir
+    file mkdir [file join $idir buttonbar]
+    file mkdir [file join $idir noaa]
+    file mkdir [file join $idir about]
+    file mkdir [file join $idir about org]
+
+    # Clean up some old stuff
+    foreach fname [glob -nocomplain -directory $pdir build.*] {
+	file delete $fname
+    }
+    
+    # Bring the starpack vfs directory up to date
+    file copy -force klimb.tcl $C(star)/klimb.tcl
+    eval file copy -force [glob packages/*.tcl $pdir]
+    eval file copy -force [glob packages/help.txt $pdir]
+    eval file copy -force [glob packages/googlemap_template.html $pdir]
+    eval file copy -force [glob packages/xphoto.dll $pdir]
+    eval file copy -force [glob packages/build.* $pdir]
+    foreach subdir {img1.3 trampoline pdf4tcl-0.2} {
+	file delete -force [file join $pdir $subdir]
+	file copy -force [file join packages $subdir] $pdir
+    }
+    eval file copy -force [glob Images/*.gif] $idir
+    eval file copy -force [glob Images/*.png] $idir
+    eval file copy -force [glob Images/buttonbar/*.gif] $idir/buttonbar/
+    eval file copy -force [glob Images/noaa/*.jpg] $idir/noaa/
+    eval file copy -force [glob Images/about/*.gif] $idir/about/
+    eval file copy -force [glob Images/about/*.jpg] $idir/about/
+    eval file copy -force [glob Images/about/org/*.gif] $idir/about/org/
+    eval file copy -force [glob Images/about/org/*.jpg] $idir/about/org/
+
+    cd starpack
+    exec tclkitsh sdx.kit wrap klimb.exe -runtime tclkit-win32.upx.exe
+    file copy -force klimb.exe $C(kname)
+    file copy -force klimb.exe k:/
+    cd ..
+
+    INFO "    [file nativename $C(kname)]"
+    set files [concat k:/klimb.tcl \
+		   k:/sample.gpx k:/sample_ohio.gpx \
+		   [glob k:/packages/*.tcl] \
+		   [glob k:/packages/img1.3/*] \
+		   [glob k:/packages/help.txt] \
+		   [glob k:/packages/googlemap_template.html] \
+		   [glob k:/Images/*.gif] \
+		   [glob k:/Images/*.png] \
+		   [glob k:/Images/buttonbar/*.gif] \
+		   [glob k:/Images/noaa/*.jpg] \
+		   [glob k:/Images/about/*.gif] \
+		   [glob k:/Images/about/*.jpg] \
+		   [glob k:/Images/about/org/*.gif] \
+		   [glob k:/Images/about/org/*.jpg]]
+    CreateZip $C(kzname) $files
+}
+proc GetBuildNumber {} {
+    set bnum 0
+    set bname [glob -nocomplain k:/packages/build.*]
+    file delete $bname
+    regexp {\d+$} $bname bnum
+    incr bnum
+    set bname "k:/packages/build.$bnum"
+    close [open $bname w]
+    return $bnum
+}
+
+proc DoBackup {{quick 0}} {
+    global C env
+    
+    set bname "klimb_backup_[clock format [clock seconds] -format %Y%m%d]"
+    append bname [string repeat "q" $quick]
+    append bname ".zip"
+    set bname [file join $C(bdir) backup $bname]
+    
+    INFO "building backup [file nativename $bname]"
+    set files [list klimb.tcl dosetup.tsh]
+    if {$quick < 2} {
+	lappend files HowTo.*
+	lappend files sample.gpx sample_ohio.gpx
+	lappend files "Images/*"
+	lappend files "Images/buttonbar/*" "Images/noaa/*"
+	lappend files "setup/*.iss" "packages/*" 
+	if {! $quick} {
+	    lappend files "Images/about/*" "Images/about/org/*"
+	    lappend files "gps/geo*.tsh"
+	    lappend files "packages/img1.3/*" "tools/*"
+	}
+	
+	foreach dir [glob -nocomplain -- *.zone] {
+	    if {! [file exists [file join $dir zone.data]]} continue
+	    if {[file exists [file join $dir testonly]]} continue
+	    
+	    lappend files "$dir/*"
+	    if {! $quick && [file isdirectory "$dir/images"]} {
+		lappend files "$dir/images/*"
+	    }
+	}
+	if {! $quick} {
+	    foreach dir [glob -nocomplain starpack/klimb.vfs/lib/*] {
+		lappend files [file join $dir "*"]
+	    }
+	}
+    }
+    CreateZip $bname $files
+    DoBackupFTP $bname
+
+    # Now clear the attribute bit for all the files
+    set dfiles {}
+    foreach fname $files {
+	lappend dfiles [file nativename $fname]
+    }
+    for {set i 0} {$i < [llength $dfiles]} {incr i 50} {
+	set i2 [expr {$i + 50}]
+	eval exec [list $env(comspec)] /c attrib /q -a [lrange $dfiles $i $i2]
+    }
+}
+proc DoBackupFTP {bname} {
+
+    INFO "    uploading [comma [file size $bname]] bytes"
+    INFO "    connecting to $::C(ftp)..."
+    set fh [::ftp::Open $::C(ftp) keithv $::C(passwd) -output FTPOutput \
+		-mode passive -progress [list FTPProgress [comma [file size $bname]]]] 
+		
+    ::ftp::Cd $fh htdocs/binaries/backup
+    INFO "    putting [file nativename $bname]"
+    ::ftp::Put $fh $bname [file tail $bname]
+    ::ftp::Close $fh
+    INFO ""
+}
+proc FTPProgress {total n} {
+    if {$total eq "?"} { set total $::total }
+    #puts -nonewline stderr "."
+    puts -nonewline stderr "\r$total/[comma $n]"
+    flush stderr
+}
+proc FTPOutput {args} {				;# Stub to suppress messages
+}
+proc comma { num } {
+    while {[regsub {^([-+]?[0-9]+)([0-9][0-9][0-9])} $num {\1,\2} num]} {}
+    return $num
+}
+##+##########################################################################
+# 
+# DoZones -- builds all the zone setup files
+# 
+proc DoZones {{who *}} {
+    global C
+
+    if {! [file exists $C(kname)]} DoKlimb
+    set zones [glob setup/zone_${who}.iss]
+    foreach zone $zones {
+	set oname [GetOutputFile $zone]
+	INFO "building $zone => [file nativename $oname]"
+	set n [catch {exec $C(iss) $zone > nul} emsg]
+	if {! $n} continue
+	DIE "exec error: $emsg\n cmd: $C(iss) $zone"
+    }
+}
+proc DoFTP {argList} {
+    INFO "    connecting to $::C(ftp)..."
+    set fh [::ftp::Open $::C(ftp) keithv $::C(passwd) -output FTPOutput \
+    		-mode passive -progress [list FTPProgress "?"]]
+    foreach arg1 $argList {
+	foreach arg [glob -nocomplain [string map {\\ /} $arg1]] {
+	    set localName [file normalize $arg]
+	    set path [file split $localName]
+	    if {! [file exists $localName]} {DIE "bad name: $localName"}
+	    if {[lindex $path 1] ne "newWeb"} {DIE "missing newWeb: $localName"}
+	    
+	    if {[file isdirectory $localName]} {
+		set serverDir [eval file join [lreplace $path 0 1 "/htdocs"]]
+		foreach fname [glob -nocomplain -directory $localName -- *] {
+		    if {! [file isfile $fname]} continue
+		    DoFTP1File $fh $fname $serverDir
+		}
+	    } else {
+		set path [lrange $path 0 end-1]
+		set serverDir [eval file join [lreplace $path 0 1 "/htdocs"]]
+		DoFTP1File $fh $localName $serverDir
+	    }
+	}
+    }
+    ::ftp::Close $fh
+}
+
+proc DoFTP1File {fh localName serverDir} {
+    set ::total [comma [file size $localName]]
+    set tail [file tail $localName]
+    INFO "    $tail to $serverDir: $::total bytes"
+    ::ftp::Cd $fh $serverDir
+    if {! $::debug} {
+	::ftp::Put $fh $localName $tail
+    }
+    INFO ""
+}
+
+proc GetOutputFile {fname} {
+    set fin [open $fname r]
+    set data [read $fin]
+    close $fin
+    
+    set ofname "<ofname>"
+    set odir "<odir>"
+    regexp -line -nocase {^OutputBaseFilename=(.*)} $data . ofname
+    regexp -line -nocase {^OutputDir=(.*)} $data . odir
+    set oname [file join $odir "$ofname.exe"]
+    return $oname
+}
+##+##########################################################################
+# 
+# DoMigrate -- builds the kmigrate utility
+# 
+proc DoMigrate {} {
+    global C
+    INFO "building kmigrate.exe"
+
+    set exename [file join $C(bdir) kmigrate.exe]
+    file delete $exename
+
+    # Bring the starpack vfs directory up to date
+    file copy -force tools/kmigrate.tcl $C(star2)/kmigrate.tcl
+    cd starpack
+    exec tclkitsh sdx.kit wrap kmigrate.exe -runtime tclkit-win32.upx.exe
+    file copy -force kmigrate.exe $exename
+    cd ..
+}
+##+##########################################################################
+# 
+# DoTools -- builds the MakeZone and MakeRegions utilities
+# 
+proc DoTools {} {
+    global C
+
+    foreach exe {makezone makeregions mergemaps} {
+	INFO "build ${exe}.exe"
+	set starDir [file join starpack ${exe}.vfs lib app-$exe]
+	set tclname "${exe}.tcl"
+	set exename "${exe}.exe"
+	set webname [file join $C(bdir) ${exe}.exe]
+	file delete starpack/$exename
+	file delete $webname
+
+	file copy -force tools/$tclname $C(bdir)
+
+	# Bring the starpack vfs directory up to date
+	file copy -force tools/$tclname $starDir/$tclname
+	cd starpack
+	exec tclkitsh sdx.kit wrap $exename -runtime tclkit-win32.upx.exe
+	file copy -force $exename $webname
+	cd ..
+    }
+
+}
+proc DoOneZone {zdir {glob *.klr}} {
+    if {[file exists [file join $zdir testonly]]} {
+	INFO "skipping $zdir"
+	return
+    }
+    if {! [file readable [file join $zdir zone.data]]} {
+	INFO "$zdir missing $zdir/zone.data file"
+	return
+    }
+    
+    set regions [lsort -dictionary [glob -nocomplain [file join $zdir $glob]]]
+    INFO "$zdir has [llength $regions] region files"
+	
+    foreach rfile $regions {
+	INFO "  [file nativename $rfile]"
+	DoOneRegion $rfile
+    }
+    INFO ""
+}
+##+##########################################################################
+# 
+# DoOneRegion -- Parses a region file and writes the ISS template then
+# calls ISS to make the setup program and also creates a ZIP of the files.
+# 
+proc DoOneRegion {rfile} {
+    global ISS S MAPS SRC C
+
+    array unset ISS
+    array unset S
+    array unset MAPS
+    array unset SRC
+
+    set S(rfile) [file normalize [lindex $rfile]]
+    if {! [file exists $S(rfile)]} {
+	DIE "cannot locate region file '$S(rfile)'"
+    }
+    set S(kregion) [file tail $S(rfile)]
+    set S(region) [string totitle [file root $S(kregion)]]
+    set S(lregion) [string tolower $S(region)]
+    set S(zdir) [file dirname $S(rfile)]
+    set S(zone) [file root [file tail $S(zdir)]]
+    set S(lzone) [string tolower $S(zone)]
+    set S(zzone) "$S(zone).zone"
+
+    set S(iss) "region_$S(lregion).iss"
+    set S(iss) [file join setup $S(iss)]
+
+    # Now for all the ISS setup parameters
+    set klimb Klimb
+    if {$S(lzone) == "ohio"} { set klimb "Klimb Ohio"}
+    set ISS(AppName) "$klimb-$S(region) Region"
+    set ISS(AppVerName) "$klimb-$S(region) Region"
+    set ISS(OutputBaseFilename) "setup_$S(lregion)"
+    set ISS(OutputDir) [file nativename [file join $C(zdir) $S(zzone)]]
+
+    ParseRegionFile $S(rfile)
+    WriteISSFile
+    CreateISSSetup
+    
+    set zname [file join $ISS(OutputDir) "$S(lregion).zip"]
+    CreateZip $zname $S(files)
+
+}
+proc ParseRegionFile {rfile} {
+    global SRC S MAPS
+
+    set azone "{app}/$S(zzone)"
+    set SRC(zone.data) $azone
+    if {[file isdirectory "$S(zzone)/Images"]} {
+	set SRC(Images\\*.*) "$azone/Images"
+    }
+    if {[file exists "$S(zzone)/klimb.rc"]} {
+	set SRC(klimb.rc) $azone
+    }
+    set SRC($S(kregion)) $azone
+
+    set FIN [open $rfile r]
+    set lines [split [read $FIN] "\n"] ; list
+    close $FIN
+    foreach line $lines {
+	if {[string match "nodes=*" $line]} {
+	    set nfile [string range $line 6 end]
+	    set SRC($nfile) $azone
+	    continue
+	}
+
+	if {[regexp {^map=(.*\.(gif|jpg)):} $line => mapfile]} {
+	    set MAPS($mapfile) "$azone/[file dirname $mapfile]"
+	    continue
+	}
+    }
+}
+proc WriteISSFile {} {
+    global ISS S SRC MAPS
+    set S(files) {}
+
+    set FOUT [open $S(iss) w]
+    puts $FOUT $::C(rtemplate)
+    foreach a [lsort -dictionary [array names ISS]] {
+	puts $FOUT "$a=$ISS($a)"
+    }
+
+    puts $FOUT "\n\[Files]"
+    foreach a [lsort -dictionary [array names SRC]] {
+	set fname [file nativename [file join $S(zdir) $a]]
+	lappend S(files) $fname
+	puts -nonewline $FOUT "Source: \"$fname\"; "
+	puts -nonewline $FOUT "DestDir: \"$SRC($a)\"; "
+	puts $FOUT "Flags: ignoreversion"
+    }    
+    foreach a [lsort -dictionary [array names MAPS]] {
+	set fname [file nativename [file join $S(zdir) $a]]
+	lappend S(files) $fname
+	puts -nonewline $FOUT "Source: \"$fname\"; "
+	puts -nonewline $FOUT "DestDir: \"$MAPS($a)\"; "
+	puts $FOUT "Flags: ignoreversion"
+    }    
+    close $FOUT
+}
+proc CreateISSSetup {} {
+    global C S ISS
+
+    set ofile [file join $ISS(OutputDir) $ISS(OutputBaseFilename)]
+    INFO "    ISS =>  [file nativename $ofile].exe"
+    set n [catch {exec $C(iss) $S(iss) > nul} emsg]
+    if {! $n} return
+    DIE "exec error: $emsg\n cmd: $C(iss) $S(iss)"
+}
+
+##+##########################################################################
+# 
+# CreateZip -- creates a zip file from a list of files
+# 
+proc CreateZip {zname files} {
+    INFO "    zipping [file nativename $zname]"
+
+    set fname [lindex $files 0]
+    if {[regexp -nocase {^k:} $fname]} {
+	if {[file isdirectory d:/klimb]} {
+	    cd d:/
+	} elseif {[file isdirectory c:/klimb]} {
+	    cd c:/
+	} else {
+	    error "Cannot figure out where k: is"
+	}
+    }
+    
+    file delete $zname
+    set cmd [list zip -q $zname]
+    foreach fname $files {
+	# Make fname a relative path
+	#regsub -nocase {^([a-z]:[\\/]?)?klimb[\\/]} $fname {} fname
+
+	# Make fname have klimb/ starting directory
+	regsub -nocase {^k:[\\/]} $fname "klimb/" fname
+	lappend cmd $fname
+    }
+    eval exec $cmd
+    cd $::C(home)
+}
+##+##########################################################################
+# 
+# Clean -- deletes all created files
+# 
+proc DoClean {} {
+    global C
+    
+    set files {}
+    set globs [list [file join $C(bdir) *.exe] \
+		   [file join $C(bdir) *.zip] \
+		   [file join $C(zdir) *.zone/*.exe] \
+		   [file join $C(zdir) *.zone/*.zip] \
+		   k:/setup/region*.iss]
+    foreach g $globs {
+	set f [glob -nocomplain $g]
+	set files [concat $files $f]
+    }
+
+    if {[llength $files] == 0} {
+	INFO "already clean"
+	return
+    }
+    foreach fname $files {
+	INFO "deleting [file nativename $fname]"
+	file delete $fname
+    }
+    INFO ""
+}
+##+##########################################################################
+# 
+# DoBeta -- builds the beta install
+# 
+proc DoBeta {} {
+    global C
+
+    #if {! [file exists $C(kname)]} DoKlimb
+    DoKlimb
+    set beta setup/beta.iss
+
+    set oname [GetOutputFile $beta]
+    INFO "building beta setup => [file nativename $oname]"
+    set n [catch {exec $C(iss) $beta > nul} emsg]
+    if {$n} {
+	DIE "exec error: $emsg\n cmd: $C(iss) $beta"
+    }
+    DoBetaWeb
+}
+##+##########################################################################
+# 
+# DoBetaWeb -- builds beta.html
+# 
+proc DoBetaWeb {} {
+    global betaweb
+    
+    # %VERSION% %DATE% %URL% %MAJOR% %MINOR% %BUGS%
+
+    set betaweb(%DATE%) [clock format [clock seconds] -format "%b %d, %Y"]
+    _GetWhatsNew
+    _GetOutputURL
+    INFO "writing newweb/beta.html"
+    _MakeWebPage
+}
+
+proc _GetWhatsNew {} {
+    global betaweb
+
+    interp create -safe newInterp
+    newInterp eval set state(dosetup) 1
+    newInterp eval package provide Tk 1.0
+    newInterp eval proc wm args return
+    set n [catch {newInterp invokehidden source k:/klimb.tcl} err]
+    
+    set betaweb(%VERSION%) [newInterp eval set state(version)]
+    set versions [newInterp eval array names ::WHATSNEW *b]
+    set versions [concat $betaweb(%VERSION%) $versions]
+    set versions [lsort -dictionary -decreasing -unique $versions]
+
+    set html ""
+    foreach version $versions {
+	set txt [newInterp eval set ::WHATSNEW($version)]
+	array set items [_GrindWhatsNew $txt]
+
+	append html "<strong><font size=+2>KLIMB V$version</font></strong><br><br>\n"
+	foreach pre {* = -} who {"Major Features" "Minor Features" "Bug Fixes"} {
+	    if {$items($pre) eq ""} continue
+
+	    append html "<strong>$who</strong><br>\n"
+	    append html "<table>\n"
+	    foreach {date item} $items($pre) {
+		append html "<tr><td width=5 valign='top'>&bull;</td>\n"
+		append html "    <td>$date: $item</td></tr>\n"
+	    }
+	    append html "</table><br>\n"
+	}
+    }
+    interp delete newInterp
+    set betaweb(%WHATSNEW%) $html
+}
+##+##########################################################################
+# 
+# ::About::_GrindWhatsNew -- text processes what's new info
+# 
+proc _GrindWhatsNew {txt} {
+    foreach pre {- * =} {
+	set items($pre) {}
+    }
+    foreach line [split [string trim $txt] "\n"] {
+	set n [regexp {^[\# \t]*?KPV\s+(.*?)\s+-\s+?(.*?)$} $line => date i]
+	if {! $n} continue
+	foreach item [split $i ";"] {
+	    set item [string trim $item]
+	    set pre [string index $item 0]
+	    if {$pre eq "-" || $pre eq "*"} {
+		set item [string range $item 1 end]
+	    } else {
+		set pre "="
+	    }
+	    lappend items($pre) $date $item
+	}
+    }
+    return [array get items]
+}
+proc _GetOutputURL {} {
+    set fin [open setup/beta.iss r]
+    set data [read $fin] ; list
+    close $fin
+    set n [regexp -line {^OutputBaseFilename=(.*)$} $data => fname]
+    set ::betaweb(%URL%) "binaries/$fname.exe"
+
+}
+proc _MakeWebPage {} {
+    global betaweb
+
+    set fin [open k:/newweb/beta_template.html r]
+    set data [read $fin] ; list
+    close $fin
+
+    set rstr ""
+    foreach arr [array names betaweb %*%] {
+	lappend rstr $arr $betaweb($arr)
+    }
+    set data [string map $rstr $data]
+    
+    set fout [open k:/newweb/beta.html w]
+    puts -nonewline $fout $data
+    close $fout
+}
+################################################################
+#
+# DoZip
+#
+proc DoZip {zdirs} {
+    foreach zdir $zdirs {
+	set zdir [file normalize $zdir]
+	set zname [file join $zdir zone.data]
+	if {! [file exists $zname]} {
+	    puts stderr "bad zone directory: '$zdir'"
+	    return
+	}
+	
+	set files [_GetZoneFiles $zdir]
+	set zname "[file tail $zdir].zip"
+	set zname [file join [pwd] $zname]
+
+	CreateZip $zname $files
+    }
+}
+proc _GetZoneFiles {zdir} {
+    set fnames [concat [_DoZoneData $zdir] [_DoRegionFiles $zdir]]
+    foreach fav {favorites.data favorites.user} {
+	set fav [file join $zdir favorites.data]
+	if {[file exists $fav]} {lappend fnames $fav}
+    }
+    return $fnames
+}
+proc _DoRegionFiles {zdir} {
+    set klrFiles [glob -nocomplain -directory $zdir -- *.klr]
+    set nFiles {}
+    set rFiles {}
+    foreach kname $klrFiles {
+	set data [slurp $kname] ; list
+	foreach line [split $data \n] {
+	    if {[string match "map=*" $line]} {
+		set n [regexp {map=(.*?):} $line . mapName]
+		if {$n} { lappend rFiles [file join $zdir $mapName] }
+	    } elseif {[string match "node=*" $line]} {
+		set n [regexp {node=(.*?)$} $line . mapName]
+		if {$n} { lappend nFiles [file join $zdir $mapName] }
+	    }
+	}
+    }
+    set nFiles [lsort -unique -dictionary $nFiles]
+    return [concat $klrFiles $nFiles $rFiles]
+}
+proc _DoZoneData {zdir} {
+    set zname [file join $zdir zone.data]
+    set zFiles $zname
+    set data [slurp $zname] ; list
+    foreach line [split $data \n] {
+	if {! [string match "*map=*" $line]} continue
+	set n [regexp {map=(.*?)$} $line . mapName]
+	if {$n} { lappend zFiles [file join $zdir $mapName] }
+    }
+    return $zFiles
+}
+proc slurp {fname} {
+    set fin [open $fname "r"]
+    set data [read $fin]; close $fin
+    return $data
+}
+
+
+
+proc DIE {emsg} {
+    puts stderr $emsg
+    exit
+}
+proc INFO {msg} {
+    puts stderr $msg
+}
+proc USAGE {} {
+    INFO "usage DoSetup <target>..."
+    INFO "  targets: all  (klimb zone *.zone)"
+    INFO "           klimb             -- builds klimb.exe & klimb.zip"
+    INFO "           zone              -- builds sfbay, ohio & mttam setup"
+    INFO "           zone/<name>       -- builds <name> setup only"
+   #INFO "           kmigrate"
+    INFO "           tools             -- builds MakeZone and MakeRegions"
+    INFO "           clean"
+    INFO "           ftp <file|dir...> -- uploads to www.klimb.org"
+    INFO "           backup            -- zips and uploads all non-map files"
+    INFO "           qbackup           -- zips and uploads critical files"
+    INFO "           zip zdir...       -- zips up a zone"
+    INFO "           beta              -- builds beta version"
+    INFO "           betaweb           -- builds beta web page"
+    INFO "           test              -- output into klimb/test"
+    INFO "           <zone directory>"
+    INFO "           <zone directory>/abc.klr"
+    exit
+}
+    
+################################################################
+################################################################
+
+if {$tcl_interactive} return
+
+if {$argc == 0} USAGE
+file mkdir $C(bdir)
+file mkdir $C(zdir)
+	      
+set n [lsearch $argv "all"]
+if {$n > -1} {
+    set argv [lreplace $argv $n $n klimb zone *.zone tools]
+}
+
+for {set i 0} {$i < [llength $argv]} {incr i} {
+    set arg [lindex $argv $i]
+    if {$arg eq "debug"} { set ::debug 1 ; continue }
+
+    if {$arg eq "-?" || $arg eq "--help"} USAGE
+    if {$arg eq "clean"} {
+	DoClean
+	continue
+    }
+    if {$arg eq "test"} {
+	set C(bdir) [set C(zdir) "k:/test"]
+	set C(kname) [file join $C(bdir) klimb.exe]
+	continue
+    }
+    if {$arg eq "klimb"} {
+	DoKlimb
+	continue
+    }
+    if {$arg eq "zone" || $arg eq "zones"} {
+	DoZones
+	continue
+    }
+    if {[regexp {^zone[\\/](.*)} $arg => zname]} {
+	DoZones $zname
+	continue
+    }
+    if {$arg eq "kmigrate"} {
+	DoMigrate
+	continue
+    }
+    if {$arg eq "tools"} {
+	DoTools
+	continue
+    }
+    if {$arg eq "backup"} {
+	DoBackup
+	continue
+    }
+    if {$arg eq "qbackup"} {
+	DoBackup 1
+	continue
+    }
+    if {$arg eq "qqbackup"} {
+	DoBackup 2
+	continue
+    }
+    if {$arg eq "beta"} {
+	DoBeta
+	continue
+    }
+    if {$arg eq "betaweb"} {
+	DoBetaWeb
+	continue
+    }
+    if {$arg eq "ftp"} {
+	DoFTP [lrange $argv [expr {$i+1}] end]
+	break
+    }
+    if {$arg eq "zip"} {
+	DoZip [lrange $argv [expr {$i+1}] end]
+	break
+    }
+
+    regsub {\\$} $arg {} arg
+    regsub -all {\\} $arg {/} arg
+    foreach fname [glob -nocomplain -- $arg] {
+	if {[file isdirectory $fname]} {
+	    DoOneZone $fname
+	    continue
+	}
+	if {[string match "*.klr" $fname]} {	;# Build single region
+	    set zdir [file dirname $fname]
+	    set rfile [file tail $fname]
+	    DoOneZone $zdir $rfile
+	    continue
+	}
+	DIE "unknown argument: $arg"
+    }
+}

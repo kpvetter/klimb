@@ -1,0 +1,117 @@
+# save this file as tkconclient.tcl then also save pkgIndex.tcl from lower on this page +abc
+package require Tk                  ;# can also run under tclsh with vwait event loop   +abc
+package provide tkconclient 0.1     ;# bogus version number                             +abc 20.08.2017
+namespace eval tkconclient {
+    variable script ""
+    variable server ""
+    variable socket ""
+    namespace export start stop
+    proc start {port {myaddr localhost}} {
+        variable socket
+        variable server
+        if {$socket ne "" || $server ne ""} stop
+        set server [socket -server [namespace current]::accept \
+                        -myaddr $myaddr $port]
+    }
+    proc stop {} {
+        variable server
+        if {$server ne ""} {
+            closesocket
+            close $server
+            set server ""
+        }
+    }
+    proc closesocket {} {
+        variable socket
+        catch {close $socket}
+        set socket ""
+        # Restore [puts]
+        rename ::puts ""
+        rename [namespace current]::puts ::puts
+    }
+    proc accept {sock host port} {
+        variable socket
+        fconfigure $sock -blocking 0 -buffering none
+        if {$socket ne ""} {
+            puts $sock "Only one connection at a time, please!"
+            close $sock
+        } else {
+            set socket $sock
+            fileevent $sock readable [namespace current]::handle
+            # Redirect [puts]
+            rename ::puts [namespace current]::puts
+            interp alias {} ::puts {} [namespace current]::_puts
+        }
+    }
+    proc handle {} {
+        variable script
+        variable socket
+        if {[eof $socket]} {
+            closesocket
+            return
+        }
+        if {![catch {read $socket} chunk]} {
+            if {$chunk eq "bye\n"} {
+                puts $socket "Bye!"
+                closesocket
+                return
+            }
+            append script $chunk
+            if {[info complete $script]} {
+                catch {uplevel "#0" $script} result
+                if {$result ne ""} {
+                    puts $socket $result
+                }
+                set script ""
+            }
+        } else {
+            closesocket
+        }
+    }
+    ## This procedure is partially borrowed from tkcon
+    proc _puts args {
+        variable socket
+        set len [llength $args]
+        foreach {arg1 arg2 arg3} $args { break }
+
+        switch $len {
+            1 {
+                puts $socket $arg1
+            }
+            2 {
+                switch -- $arg1 {
+                    -nonewline - stdout - stderr {
+                        puts $socket $arg2
+                    }
+                    default {
+                        set len 0
+                    }
+                }
+            }
+            3 {
+                if {$arg1 eq "-nonewline" &&
+                    ($arg2 eq "stdout" || $arg2 eq "stderr")} {
+                    puts $socket $arg3
+                } elseif {($arg1 eq "stdout" || $arg1 eq "stderr") \
+                              && $arg3 eq "-nonewline"} {
+                    puts $socket $arg2
+                } else {
+                    set len 0
+                }
+            }
+            default {
+                set len 0
+            }
+        }
+        ## $len == 0 means it wasn't handled above.
+        if {$len == 0} {
+            global errorCode errorInfo
+            if {[catch [linsert $args 0 puts] msg]} {
+                regsub tkcon_tcl_puts $msg puts msg
+                regsub -all tkcon_tcl_puts $errorInfo puts errorInfo
+                return -code error $msg
+            }
+            return $msg
+        }
+    }
+}

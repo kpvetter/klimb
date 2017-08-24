@@ -1,0 +1,25 @@
+KLIMB
+
+Keith's deLuxe Interactive Map Builder
+
+KLIMB is program which allows you to plan bike routes interactively on
+topographical maps of the San Francisco Bay Area, Central Ohio and
+other areas. You create a route by clicking on nodes marking key
+intersections or on the roads between the nodes. As you are building
+the route, it connstantly displays the total distance and climbing. At
+any time, with a press of the button, you can get:
+
+ o Distance and altitude profile
+ o Turn by turn detailed description of the route
+ o Zoomed in maps
+ o A 3-dimension plot of the route
+ o Add annotations to the map
+ o Print out the map and route
+ o Keep a log of a ride
+ o Export the route to a GPS device
+ o Import tracks from a GPS device
+ o View the road or node on Google maps
+
+
+To clone from github:
+git clone https://github.com/kpvetter/klimb.git

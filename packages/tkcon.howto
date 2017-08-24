@@ -1,0 +1,11 @@
+# make sure tkcon namespace exists
+namespace eval ::tkcon {}
+# we want to have only the main interpreter
+set ::tkcon::OPT(exec) ""
+# we don't want tkcon to override gets or exit
+set ::tkcon::OPT(gets) ""
+set ::tkcon::OPT(overrideexit) 0
+# use the specified window as root
+set ::tkcon::PRIV(root) .tkcon
+set ::tkcon::PRIV(protocol) "tkcon hide"
+source tkcon.tcl
