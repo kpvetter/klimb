@@ -10,6 +10,7 @@ exit
 # by Keith Vetter
 #
 # For copyright and copying information see procedure ::About::License below.
+# githup page: https://github.com/kpvetter/klimb
 #
 package require Tcl 8.4
 package require Tk
