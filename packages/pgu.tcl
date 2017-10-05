@@ -20,7 +20,7 @@ exec tclsh $0 ${1+"$@"}
 #  ::PGU::Launch
 #  ::PGU::Cancel who  => who: -all -queue id
 #  ::PGU::Wait
-#  ::PGU::Statistics => qlen pending done timeouts failures cancelled
+#  ::PGU::Statistics => Dictionary: qlen pending done timeouts failures cancelled
 #
 
 package require http
@@ -33,6 +33,7 @@ namespace eval ::PGU {
     variable qtail 0                            ;# Last in use slot
     variable stats                              ;# Array of statistics
     variable wait 0                             ;# For vwait
+    variable log 0
 
     array set options {
         -degree 50
@@ -86,7 +87,11 @@ proc ::PGU::Config {args} {
 #
 proc ::PGU::Add {url cookie doneCmd {statusCmd ""} {progressCmd ""}} {
     variable queue ; variable qtail ; variable stats
+    variable qhead
 
+    for {set i $qhead} {$i <= $qtail} {incr i} {
+        if {$queue($i,url) eq $url} return
+    }
     incr qtail
     set queue($qtail,id) $qtail
     set queue($qtail,url) $url
@@ -99,8 +104,6 @@ proc ::PGU::Add {url cookie doneCmd {statusCmd ""} {progressCmd ""}} {
 
     incr stats(qlen)
     ::PGU::_StatusChange $qtail "queued"
-
-    return $qtail
 }
 ##+##########################################################################
 #
@@ -122,6 +125,7 @@ proc ::PGU::Launch {} {
         incr qhead
         if {$queue($id,token) != 0} continue    ;# Already handled (cancel)
         set queue($id,token) zzzz               ;# Mark so can't be cancelled
+        ::PGU::Log queue($id,token) <-- zzzz
 
         incr stats(pending)
         incr stats(qlen) -1
@@ -135,7 +139,9 @@ proc ::PGU::Launch {} {
         }
 
         set queue($id,cmd) $cmd
+        ::PGU::Log queue($id,cmd) $cmd
         set queue($id,token) [eval $cmd]
+        ::PGU::Log queue($id,token) <-- $queue($id,token)
     }
 }
 ##+##########################################################################
@@ -190,8 +196,10 @@ proc ::PGU::_CancelOne {id} {
         incr stats(qlen) -1
         set queue($id,token) -3                 ;# Mark as cancelled
         ::PGU::_StatusChange $id "cancel"
+        array unset queue $id,*
     } else {
         ::http::reset $token cancel             ;# Pending
+        incr stats(pending) -1
     }
 }
 ##+##########################################################################
@@ -204,6 +212,8 @@ proc ::PGU::_HTTPCommand {id token} {
     variable stats
     variable options
     variable wait
+
+    ::PGU::Log $id $token
 
     #foreach {url cmd cookie cnt token} $queue($id) break
     set url $queue($id,url)
@@ -236,6 +246,7 @@ proc ::PGU::_HTTPCommand {id token} {
         ::PGU::_StatusChange $id "done"
         set queue($id,token) -1                 ;# Mark as done
         incr stats(done)
+        array unset queue $id,*
     }
     incr stats(pending) -1                      ;# One less outstanding request
     ::PGU::Launch                               ;# Try launching another request
@@ -261,12 +272,15 @@ proc ::PGU::Wait {} {
 }
 ##+##########################################################################
 #
-# ::PGU::Statistics -- returns some statistics of the current state
+# ::PGU::Statistics -- returns dictionary of some statistics of the current state
 #
 proc ::PGU::Statistics {} {
     variable stats
-    return [list $stats(qlen) $stats(pending) $stats(done) $stats(timeouts) \
-               $stats(failures) $stats(cancelled)]
+    set result {}
+    foreach key {qlen pending done timeouts failures cancelled} {
+        lappend result $key $stats($key)
+    }
+    return $result
 }
 ##+##########################################################################
 #
@@ -281,4 +295,11 @@ proc ::PGU::_StatusChange {id how} {
     set n [catch {$scmd $id $how $cookie} emsg]
     if {$n} {puts stderr "StatusChange error : $emsg\n"}
 }
+proc ::PGU::Log {args} {
+    if {$::PGU::log} {
+        set function [lindex [info level -1] 0]
+        lappend ::LOG "$function [join $args " "]"
+    }
+}
+
 return 1

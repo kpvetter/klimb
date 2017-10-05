@@ -1,5 +1,6 @@
 array set ::Config::cdata {
-	balloon,font "Helvetica 10"
-	dragGain "Medium"
-	region,default "Peninsula"
+        balloon,font "Helvetica 10"
+        dragGain "Medium"
+        n,font "Helvetica 8"
+        region,default "Peninsula"
 }

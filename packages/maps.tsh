@@ -1,0 +1,289 @@
+#!/bin/sh
+# Restart with tcl: -*- mode: tcl; tab-width: 8; -*- \
+exec tclsh $0 ${1+"$@"}
+
+##+##########################################################################
+#
+# maps.tsh -- interface on top of slippy::fetcher
+# by Keith Vetter 2017-09-10
+#
+#  LatLon2Tile => ::map::slippy geo 2tile [list $zoom $lat $lon]
+#  Tile2LatLon => ::map::slippy tile 2geo [list $zoom $row $col]
+#    => top left corner
+#    tile:  {12 1588 658}                => zoom row col
+#    geo:   {12 37.43997 -122.1679}      => zoom lat lon
+#    point: {12 6504448 2695168 }        => zoom y x
+
+package require http
+package require tls
+http::register https 443 [list ::tls::socket -tls1 1]
+
+
+# package require map::slippy 0.5
+# package require map::slippy::fetcher 0.3
+# package require map::slippy::cache
+source ~/misc/map_slippy.tcl
+source ~/misc/map_slippy_fetcher.tcl
+source ~/misc/map_slippy_cache.tcl
+# slippy 0.5   /Library/Tcl/teapot/package/tcl/teapot/tcl8/8.4/map/slippy-0.5.tm
+# slippy 0.3   /Library/Tcl/tcllib1.12/map/map_slippy.tcl -- numerous bugs
+# BUG in map::slippy::cache -> "method {Do unset}" should be "method {Done unset}"
+
+# Thunderforest info: https://thunderforest.com/maps/
+
+namespace eval ::Klippy {
+    variable META
+    set META(init) 0
+    variable apikey "ce050848fdef4a85b0f3fca12a083432"
+    variable MAP_SUPPLIERS {
+        {BAD "Cycle Maps" {http://andy.sandbox.cloudmade.com/tiles/cycle} {2 12}}
+        {"Google" {http://mt0.google.com/vt/x=${c}&y=${r}&z=${z}} {0 22}}
+        {BAD "Google Satellite" {http://khm1.google.com/kh/v=49&x=${c}&y=${r}&z=${z}} {0 22}}
+        {"Google Satellite" {http://mt1.google.com/vt/lyrs=y&x=${x}&y=${y}&z=${z}} {0 15}}
+        {"Google Terrain" {http://khm.google.com/vt/lbw/lyrs=p&x=${c}&y=${r}&z=${z}} {0 22}}
+        {BAD "Maplint" {http://tah.openstreetmap.org/Tiles/maplint} {12 16}}
+        {"Mapnik" {http://tile.openstreetmap.org} {0 18}}
+        {BAD "Osmerander" {http://tah.openstreetmap.org/Tiles/tile} {0 17}}
+        {"USGS" {https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/${z}/${r}/${c}} {0 16}}
+        {"USGS2" {https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${z}/${r}/${c}} {0 16}}
+        {"USGS3" {https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/tile/${z}/${r}/${c}} {0 16}}
+        {"USGS4" {https://basemap.nationalmap.gov/arcgis/rest/services/USGSHydroCached/MapServer/tile/${z}/${r}/${c}} {0 16}}
+        {"USGSShaded" {https://basemap.nationalmap.gov/arcgis/rest/services/USGSShadedReliefOnly/MapServer/tile/${z}/${r}/${c}} {0 16}}
+
+        {"Cycle Maps" {https://${s}.tile.thunderforest.com/cycle/${z}/${c}/${r}.png?apikey=${apikey}} {0 22}}
+        {"TF Cycle" {https://${s}.tile.thunderforest.com/cycle/${z}/${c}/${r}.png?apikey=${apikey}} {0 22}}
+        {"TF Transport" {https://${s}.tile.thunderforest.com/transport/${z}/${x}/${y}.png?apikey=${apikey}} {0 22}}
+        {"TF Landscape" {https://${s}.tile.thunderforest.com/landscape/${z}/${x}/${y}.png?apikey=${apikey}} {0 22}}
+        {"TF Outdoors" {https://${s}.tile.thunderforest.com/outdoors/${z}/${x}/${y}.png?apikey=${apikey}} {0 22}}
+        {"TF Transport Dark" {https://${s}.tile.thunderforest.com/transport-dark/${z}/${x}/${y}.png?apikey=${apikey}} {0 22}}
+        {"TF Spinal Map" {https://${s}.tile.thunderforest.com/spinal-map/${z}/${x}/${y}.png?apikey=${apikey}} {0 22}}
+        {"TF Pioneer" {https://${s}.tile.thunderforest.com/pioneer/${z}/${x}/${y}.png?apikey=${apikey}} {0 22}}
+        {"TF Mobile Atlas" {https://${s}.tile.thunderforest.com/mobile-atlas/${z}/${x}/${y}.png?apikey=${apikey}} {0 22}}
+        {"TF Neighbourhood" {https://${s}.tile.thunderforest.com/neighbourhood/${z}/${x}/${y}.png?apikey=${apikey}} {0 22}}
+        {"hot" {http://tile-${s}.openstreetmap.fr/hot/${z}/${x}/${y}.png} {0 22}}
+    }
+
+    set META(suppliers) {}
+    foreach supplier $MAP_SUPPLIERS {
+        lassign $supplier name url zoom
+        if {$name eq "BAD"} continue
+        lappend META(suppliers) $name
+        set META($name,url) $url
+        set META($name,zoom) $zoom
+        set META($name,apikey) $apikey
+    }
+
+    # Modify fetcher's url construction routine to handle OpenStreet interface
+    proc ::map::slippy::fetcher::urlOf { tile } {
+        upvar 0 ::Klippy::apikey apikey
+        upvar 1 mybase mybase
+        lassign $tile z r c
+        lassign $tile z y x
+        set s [lindex {a b c} [expr {int(rand()*3)}]]
+
+        # OpenStreet maps have substition based urls
+        if {[string first "$" $mybase] > -1} {
+            set url [subst -nocommands -nobackslashes $mybase]
+            return $url
+        }
+        return $mybase/$z/$c/$r.png
+    }
+}
+
+proc ::Klippy::Init {cacheDir} {
+    variable MAP_SUPPLIERS
+    variable META
+
+    if {$META(init)} return
+    set META(init) 1
+    set META(cacheDir) $cacheDir
+    set META(suppliers) {}
+
+    foreach supplier $MAP_SUPPLIERS {
+        lassign $supplier name url zoom
+        if {$name eq "BAD"} continue
+        lappend META(suppliers) $name
+        set META($name,url) $url
+        set META($name,zoom) $zoom
+    }
+}
+proc ::Klippy::InitOneFetcher {name} {
+    variable META
+
+    if {! $::Klippy::META(init)} { error "::Klippy::Init cacheDir needs to be called first" }
+    if {[info exists META($name,fetcher)]} return
+
+    set url $META($name,url)
+    set zoom $META($name,zoom)
+
+    set safeName [string map {" " ""} $name]
+    set fetcherName $safeName
+    if {[info commands $fetcherName] ne ""} { rename $fetcherName {} }
+    set maxZoomLevel [lindex $zoom 1] ; incr maxZoomLevel
+    set fetcherName [::map::slippy::fetcher $fetcherName $maxZoomLevel $url]
+
+    set cacherName "c$fetcherName"
+    if {[info commands $cacherName] ne ""} { rename $cacherName {} }
+    set thisCacheDir [file join $META(cacheDir) $safeName]
+    file mkdir $thisCacheDir
+    set cacherName [::map::slippy::cache $cacherName $thisCacheDir $fetcherName]
+
+    set META($name,fetcher) $fetcherName
+    set META($name,cacher) $cacherName
+}
+
+
+# proc ::Klippy::InitFetchers {cacheDir} {
+#     variable MAP_SUPPLIERS
+#     variable META
+
+#     if {[info exists META(cacheDir)] && $META(cacheDir) eq $cacheDir} return
+#     set META(cacheDir) $cacheDir
+
+#     set META(suppliers) {}
+#     foreach supplier $MAP_SUPPLIERS {
+#         lassign $supplier name url zoom
+#         if {$name eq "BAD"} continue
+#         lappend META(suppliers) $name
+#         set safeName [string map {" " ""} $name]
+
+#         set fetcherName $safeName
+#         if {[info commands $fetcherName] ne ""} { rename $fetcherName {} }
+#         set maxZoomLevel [lindex $zoom 1] ; incr maxZoomLevel
+#         set fetcherName [::map::slippy::fetcher $fetcherName $maxZoomLevel $url]
+
+#         set cacherName "c$fetcherName"
+#         if {[info commands $cacherName] ne ""} { rename $cacherName {} }
+#         set thisCacheDir [file join $cacheDir $safeName]
+#         file mkdir $thisCacheDir
+#         set cacherName [::map::slippy::cache $cacherName $thisCacheDir $fetcherName]
+
+#         set META($name,zoom) $zoom
+#         set META($name,fetcher) $fetcherName
+#         set META($name,cacher) $cacherName
+#     }
+#     set META(suppliers) [lsort -dictionary $META(suppliers)]
+# }
+proc ::Klippy::GetFetchers {} {
+    return $::Klippy::META(suppliers)
+}
+proc ::Klippy::GetFetcher {name} {
+    if {! $::Klippy::META(init)} { error "::Klippy::Init cacheDir needs to be called first" }
+    ::Klippy::InitOneFetcher $name
+    return $::Klippy::META($name,fetcher)
+}
+proc ::Klippy::GetCacher {name} {
+    if {! $::Klippy::META(init)} { error "::Klippy::Init cacheDir needs to be called first" }
+    ::Klippy::InitOneFetcher $name
+    return $::Klippy::META($name,cacher)
+}
+proc ::Klippy::GetZoom {name} {
+    return $::Klippy::META($name,zoom)
+}
+proc ::Klippy::GetMeta {name} {
+    variable META
+    return [list $META($name,url) $META($name,zoom) $META($name,apikey)]
+}
+
+
+proc ::Klippy::FetcherInfo {{name ""} {what ""}} {
+    variable META
+
+    if {$name eq ""} { return $META(suppliers) }
+    if {$what eq ""} {
+        return [dict create -zoom $META($name,zoom) -cacher $META($name,cacher) \
+                    -fetcher $META($name,fetcher)]
+    }
+    return $META($name,[string trim $what "-"])
+}
+
+proc ::Klippy::FetchOptionMenu {w varName cmd} {
+    # Creates a tk_optionMenu listing all known slippy fetchers and with callback to $cmd
+    if {! $::Klippy::META(init)} { error "::Klippy::Init cacheDir needs to be called first" }
+    tk_optionMenu $w $varName {*}[::Klippy::GetFetchers]
+    for {set i 0} {$i < [[$w cget -menu] index end]} {incr i} {
+        [$w cget -menu] entryconfig $i -command $cmd
+    }
+    return $w
+}
+proc ::Klippy::ZoomOptionMenu {w supplier varName cmd} {
+    # Creates or updates a tk_optionMenu with all valid zoom levels for $supplier
+    if {! $::Klippy::META(init)} { error "::Klippy::Init cacheDir needs to be called first" }
+    lassign [::Klippy::FetcherInfo $supplier -zoom] lo hi
+    for {set i $lo ; set range {}} {$i <= $hi} {lappend range $i ; incr i} {}
+
+    upvar #0 $varName var
+    if {! [info exists var]} { set var $hi }
+    if {$var > $hi} { set var $hi }
+    if {$var < $lo} { set var $lo }
+
+    if {! [winfo exists $w]} {
+        tk_optionMenu $w $varName {*}$range
+        for {set i 0} {$i < [[$w cget -menu] index end]} {incr i} {
+            [$w cget -menu] entryconfig $i -command $cmd
+        }
+    } else {
+        if {$cmd eq ""} { set cmd [[$w cget -menu] entrycget 0 -command] }
+        [$w cget -menu] delete 0 [[$w cget -menu] index end]
+        foreach value $range {
+            [$w cget -menu] add radiobutton -label $value -variable $varName -command $cmd
+        }
+    }
+    return $w
+}
+proc ::Klippy::FetchAndZoomOptionMenu {fetchWindow fetchVarName fetchCmd zoomWindow zoomVarName zoomCmd} {
+    # Creates both a fetcher and zoom option menus, linked together
+    ::Klippy::FetchOptionMenu $fetchWindow $fetchVarName \
+        [list ::Klippy::_fetchCmd $fetchVarName $fetchCmd $zoomWindow $zoomVarName]
+    upvar #0 $fetchVarName fetchVar
+    ::Klippy::ZoomOptionMenu $zoomWindow $fetchVar $zoomVarName $zoomCmd
+}
+proc ::Klippy::_fetchCmd {fetchVarName fetchCmd zoomWindow zoomVarName} {
+    upvar #0 $fetchVarName fetchVar
+
+    set zoomCmd [[$zoomWindow cget -menu] entrycget 0 -command]
+    ::Klippy::ZoomOptionMenu $zoomWindow $fetchVar $zoomVarName $zoomCmd
+    {*}$fetchCmd
+}
+
+return
+################################################################
+################################################################
+
+
+proc cmdFetch {} {
+    puts "in cmdFetch"
+}
+proc cmdZoom {} {
+    puts "in cmdZoom"
+}
+
+::Klippy::Init ~/slippy_cache
+destroy .t
+toplevel .t
+::Klippy::FetchAndZoomOptionMenu \
+    .t.f1 S(supplier) cmdFetch \
+    .t.z1 S(zoom) cmdZoom
+pack .t.f1 .t.z1 -side left
+
+
+return
+
+
+
+
+
+proc FetchDone {cookie cmd tile {newImage ""}} {
+    _ShowArgs
+}
+
+set supplier "Google Terrain"
+set cacheDir ~/slippy_cache
+set tile {12 1588 670}
+::Klippy::Init $cacheDir
+
+if {1} {
+    set fetcher [::Klippy::GetFetcher $supplier]
+    set cacher [::Klippy::GetCacher $supplier]
+    $cacher get $tile [list FetchDone cookie]
+}

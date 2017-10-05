@@ -1,0 +1,14 @@
+# Node data
+# N nodeid "description" alt lat1 lat2 lat3 lon1 lon2 lon3 usgs
+N n547 "Portola Rd & Old La Honda Rd" 380 37 23 45.37 122 14 47.39 388
+N Xn100 "Loma Verde Ave & Middlefield Rd" 15 37 25 44.65 122 7 20.3 15
+
+# Road data
+# R roadid id1 id2 north distance south type name comment xy survey
+R Xr1486 n507 Xn100 ? ? 0 4 "Middlefield Rd" "" {xyz 37 26 8.6 122 7 58.7 18 37 25 53.5 122 7 34.1 15}
+R Xr1487 Xn100 n865 0 ? 0 4 "Middlefield Rd" "" {xyz 37 25 22.1 122 6 45.1 17}
+
+# Split Road Data
+# S rid => nid rid1 rid2
+S r119 => Xn100 Xr1486 Xr1487
+

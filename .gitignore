@@ -4,3 +4,8 @@ Desktop.ini
 # My notes and other stuff
 *.kpv
 _*
+tmp
+slippy_cache*
+*.zone/zoom
+*.zone/Maps
+_Ohio.zone

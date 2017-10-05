@@ -30,10 +30,21 @@ set state(build) ""                             ;# Gets set in ::Init::Init
 #  popup menu cancels balloon
 #  arrow off in klimb.rc not working
 #  edit::getNextId off by 1
+#  coordinates dialog get random map snippets, not just top corner
+#
+#  GPX track #2 has weird outlying points on zoom
+#  geocaches should show up on node list as GEO
+#  geo not raised correctly after loading gps
+#  dialog box messed up background
+#  create photo dialog bad icon
+#  bulk query elevation from server
 #
 # TERRASERVER replacement -- USGS services
 #  https://viewer.nationalmap.gov/services/
-#
+# Bing maps doc
+#  https://msdn.microsoft.com/en-us/library/ff701724.aspx
+#  https://msdn.microsoft.com/en-us/library/dd877180.aspx
+
 # Mac OSX and stippling bugs
 #  Regions::Select  done
 #  SnapShot
@@ -1396,18 +1407,24 @@ namespace eval ::Zoom {
         cancel plum1   failure red     web white   cache \#b7ffff
         empty \#a0a0a0 discarded magenta
     }
+    set COLORS(web) seagreen1
 
-    array set SCREEN {l 0 t 0 r 600 b 600 w 600 h 600 rows 3 cols 3}
-    array set FETCH {q,other {} aid ""}
+    set SCREEN(tile,size) 200
+    set SCREEN(tile,size) 256
+    array set SCREEN {l 0 t 0 rows 3 cols 3}
+    set SCREEN(r) [set SCREEN(w) [expr {$SCREEN(cols) * $SCREEN(tile,size)}]]
+    set screen(b) [set SCREEN(h) [expr {$SCREEN(rows) * $SCREEN(tile,size)}]]
+
+    array set FETCH {aid ""}
     array set stats {queued 0 loading 0 retrieved 0}
 
-    set DS(mag) 1
-    set DS(theme) "topo"
+    set DS(mag) 18
+    set DS(theme) "terrain"
     set ZMAP(mag) [expr {$DS(mag) + 10}]
     set ZMAP(sid) -1                            ;# Session id
     set ZMAP(ready) 0
     set ZMAP(readonly) 0
-    set ZMAP(nofetch) 1
+    set ZMAP(nofetch) 0
     set ZMAP(nocache) 0
 
     set ::Zoom::STATIC(small) 10.0              ;# Zoom zoom window scale
@@ -1419,10 +1436,6 @@ namespace eval ::Zoom {
     #set ::Zoom::STATIC(url) "http://terraserver.microsoft.com/tile.ashx"
     #set ::Zoom::STATIC(url) "http://terraserver-usa.com/tile.ashx"
     set ::Zoom::STATIC(url) "http://MSRMaps.com/tile.ashx"
-    set ::Zoom::STATIC(mags) {}
-    for {set i 8; set n .25} {$i < 20} {incr i; set n [expr {2*$n}]} {
-        lappend STATIC(mags) [format "%g m/p" $n]
-    }
     unset -nocomplain ::Zoom::i
     unset -nocomplain ::Zoom::n
 
@@ -3235,6 +3248,7 @@ proc ::Data::DoCanDoTest {} {
 #
 proc ::Data::CanDo {what {emsg ""}} {
     global state
+    source pgu2a.tcl
     array set pkg {
         registry registry
         tktable Tktable
@@ -4873,8 +4887,7 @@ proc ::Sanity::WebMsg {txt {img ""}} {
 proc ::Sanity::USGS {} {
     ::Sanity::WebWarn "Checking USGS..."
 
-    foreach {lat lon} $::Sanity::granville break
-    set lon [expr {- $lon}]
+    lassign $::Sanity::granville lat lon
     set n [catch {::USGS::GetElevation $lat $lon usgsData} emsg]
     if {$n} {
         ::Sanity::WebWarn "USGS ERROR:\n$emsg"
@@ -4895,6 +4908,7 @@ proc ::Sanity::USGS {} {
 # ::Sanity::Terraserver -- Checks the terraserver web service
 #
 proc ::Sanity::Terraserver {} {
+    error "need to update"
     set utm [eval ::Data::ll2utm $::Sanity::granville]
     foreach {XX YY} [::Zoom::ChunkUTM $utm 11] break
 
@@ -5065,9 +5079,11 @@ proc ::Display::Create {} {
 
     #bind .c <Control-Button-3> [list PointMe %W %x %y];# For debugging
     bind .c <Leave> [list ::Balloon::Go 0 . .]  ;# Cancel balloon help
-    event add <<MenuMousePress>> <Button-3>
     if {$state(macosx)} {
+        event add <<MenuMousePress>> <Button-2>
         event add <<MenuMousePress>> <Control-Button-1>
+    } else {
+        event add <<MenuMousePress>> <Button-3>
     }
     focus .c
 
@@ -5235,6 +5251,7 @@ proc ::Display::MySeparator {w args} {
 # ::Display::MouseWheelBind -- better mouse wheel handling
 #
 proc ::Display::MouseWheelBind {} {
+    return
     # Taken from tip #171
 
     # Remove existing class MouseWheel bindings
@@ -5777,7 +5794,13 @@ proc ::Display::FirstMap {} {
             set coords(root,$x) [lat2int $d $m $s]
         }
         if {$region(slippy) && [::Data::CanDo slippy]} {
+            # Maps/CycleMaps/15/15_5269_12726.png
+            # Maps/CycleMaps/15/5251/12729.png
+            # Maps/GoogleTerrain/C13_1308_3165__8x9.jpg
             set n [regexp {(\d+)_(\d+)_(\d+)(__\d+x\d+)?\.} $start . zoom col row]
+            if {! $n} {
+                set n [regexp {/(\d+)/(\d+)/(\d+)\.} $start . zoom col row]
+            }
             if {! $n} { error "cannot parse slippy map $start" }
 
             set tile [list $zoom $row $col]
@@ -5806,7 +5829,7 @@ proc ::Display::CreateOneMap {mapname {show 1}} {
     if {![info exists map($mapname)]} return     ;# Unknown map
     set tag "::map::$mapname"
 
-    if {[lsearch [image names] $tag] == -1} {
+    if {$tag ni [image names]} {
         set fname [::Init::LocateZoneFile $mapname]
         if {$state(zoomout) || $state(zoomin)} {
             set state(isZoomed) 1
@@ -6552,7 +6575,7 @@ proc ::Display::pos2canvas {who lat lon {utmZone 0}} {
         return [::Matrix::pos2canvas $lat $lon]
     }
     if {$who eq "zoom"} {
-        return [::Zoom::ll2canvas $lat $lon]
+        return [::Klippy::LatLon2Canvas $lat $lon]
     }
 
     if {! [info exists coords($who,top)]} { return [list 0 0] }
@@ -6684,10 +6707,10 @@ proc ::Display::BboxAll {} {
             foreach who {xtop xleft xbottom xright} {d m s} $map($mapname) {
                 set $who [lat2int $d $m $s]
             }
-            if {$xtop    > $top} {set top    $xtop}
+            if {$xtop    > $top}    {set top    $xtop}
             if {$xbottom < $bottom} {set bottom $xbottom}
-            if {$xleft   > $left} {set left   $xleft}
-            if {$xright  < $right} {set right  $xright}
+            if {$xleft   > $left}   {set left   $xleft}
+            if {$xright  < $right}  {set right  $xright}
         }
 
         # Some maps are upside down
@@ -6998,8 +7021,14 @@ proc ::Display::RightWindow {w {W .}} {
 # ::Display::MakeDialogbox -- creates template dialog box. After we're done
 # the caller fills in $top.icon, $top.body and $top.buttons.
 #
+
+if {0} {
+    ::Display::MakeDialogBox .t wtitle title {::img::profile profile.gif}
+    wm deiconify .t
+}
 proc ::Display::MakeDialogBox {W wtitle title icon {padx 10}} {
 
+    set WW $W._FRAME
     set WF $W.ftitle
     set WT $W.title
     set WT2 $W.title2
@@ -7008,6 +7037,7 @@ proc ::Display::MakeDialogBox {W wtitle title icon {padx 10}} {
 
     destroy $W
     toplevel $W -bd 2 -relief ridge
+    ::ttk::frame $WW
     ::Display::TileBGFix $W
     wm withdraw $W
     wm title $W $wtitle
@@ -7040,15 +7070,16 @@ proc ::Display::MakeDialogBox {W wtitle title icon {padx 10}} {
     ::my::frame $WBTN -borderwidth 2 -relief ridge
     ::my::frame $WB -pad 15
 
-    grid rowconfigure $W 0 -minsize 10
-    grid $iwidget $WF - -row 1 -sticky new -ipadx 2
-    grid  ^        $WB x -sticky news
-    grid $WBTN - - -sticky news
-    grid config $iwidget -padx 5
+    pack $WW -fill both -expand 1
+    grid rowconfigure $WW 0 -minsize 10
+    grid $iwidget $WF - -row 1 -sticky new -ipadx 2 -in $WW
+    grid  ^        $WB x -sticky news -in $WW
+    grid $WBTN - - -sticky news -in $WW
+    grid config $iwidget -padx 5 -in $WW
 
-    grid rowconfigure $W 2 -weight 1
-    grid columnconfigure $W 1 -weight 1
-    grid columnconfigure $W 2 -minsize $padx
+    grid rowconfigure $WW 2 -weight 1
+    grid columnconfigure $WW 1 -weight 1
+    grid columnconfigure $WW 2 -minsize $padx
     grid config $WF -padx {0 5}
 
     pack $WT $WT2 -in $WF -fill both -expand 1
@@ -8297,6 +8328,16 @@ proc int2lat {lat} {
     regsub {(.)\.?0*$} $sec {\1} sec
     return [list $deg $min $sec]
 }
+proc Lon2World {{lonVar lon}} {
+    upvar 1 $lonVar lon
+    set lon [expr {-abs($lon)}]
+}
+proc Lon2Klimb {{lonVar lon}} {
+    upvar 1 $lonVar lon
+    set lon [expr {abs($lon)}]
+}
+proc nop {args} {}
+
 ##+##########################################################################
 #
 # comma
@@ -14105,7 +14146,7 @@ proc ::About::AboutDlgEx {w img callback} {
     $w.txt insert end "\t\tused with permission of author"
 
     # BUG BUG BUG: os x : something about the following lines disables the menus
-    if {$::tcl_platform(os) eq "Darwin"} { wm deiconify $w ; return }
+    # if {$::tcl_platform(os) eq "Darwin"} { wm deiconify $w ; return }
 
     $callback $w
     $w.txt config -state disabled
@@ -14597,6 +14638,7 @@ proc ::Region::ReadFile {fname} {
         if {[regexp {^slippy=(.*)$} $line {} rSlippy]} continue
         if {[regexp {^matrix=(.*)$} $line {} rMatrix]} continue
         if {[regexp {^matrixi=(.*)$} $line {} rMatrixI]} continue
+        if {[string match "region=*" $line]} continue
 
         if {[regexp {^nodes=(.*)$} $line {} rnodes]} {
             lappend rnodes2 $rnodes
@@ -16473,7 +16515,7 @@ proc ::Edit::NewDlg {who rows id} {
     }
     ::my::frame $WB.btn
 
-    if {$who eq "photo"} {
+    if {$who eq "Photo"} {
         ::Display::MakeImage ::img::camera camera.gif
         $WC create image 50 50 -image ::img::camera
     } else {
@@ -17180,7 +17222,7 @@ proc ::USGS::Query {W latlon} {
 
     set lat [eval lat2int [lrange $latlon 0 2]]
     set lon [eval lat2int [lrange $latlon 3 5]]
-    set usgs [::USGS::GetElevation $lat "-$lon"]
+    set usgs [::USGS::GetElevation $lat $lon]
     destroy $W                                  ;# Release the grab
 
     set elev $usgs
@@ -17192,6 +17234,10 @@ proc ::USGS::Query {W latlon} {
 # see http://gisdata.usgs.net/XmlWebServices/TNM_Elevation_Service.php
 # see also http://ned.usgs.gov/
 # 2017/08/22 : moved to nationalmap.gov
+#   Elevation Point Query Service: https://nationalmap.gov/epqs/pqs.php?x=${lon}&y=${lat}&units=${units}&output=xml
+#   Bulk Point Query (beta): https://viewer.nationalmap.gov/apps/bulk_pqs/
+#       web client only (ajax) -- may just be a JS wrapper on top of EPQS
+#       https://nationalmap.gov/3DEP/3dep_prodserv.html
 #
 # Result is in INTERNAL units
 #
@@ -17204,40 +17250,32 @@ proc ::USGS::GetElevation {lat lon {sanityVarName ""}} {
         upvar 1 $sanityVarName save
     }
 
-
-    set units [expr {$::state(units,internal) eq "english" ? "Feet" : "Meters"}]
-    set url [subst https://nationalmap.gov/epqs/pqs.php?x=${lon}&y=${lat}&units=${units}&output=xml]
+    set url [::USGS::GetURL $lat $lon]
     set save [list url $url lat $lat lon $lon qs ""]
     set token [::URL::GetUrlFollowRedirects $url]
-
-    if {0} { old code
-        set url http://gisdata.usgs.gov/XMLWebServices/TNM_Elevation_Service.asmx/getElevation
-        set url http://gisdata.usgs.gov/xmlwebservices2/elevation_service.asmx/getElevation
-        #set url http://gisdata.usgs.gov/xmlwebservices2/elevation_service.asmx/getElevation?AspxAutoDetectCookieSupport=1
-        set units [expr {$::state(units,internal) eq "english" ? "FEET" : "METERS"}]
-        set qs [::http::formatQuery X_Value $lon Y_Value $lat \
-                    Elevation_Units $units Source_Layer "" Elevation_Only ""]
-        set save [list url $url lat $lat lon $lon qs $qs]
-        set token [::http::geturl $url -query $qs]
-        ::http::wait $token
-        #upvar #0 $token _state
-    }
     set ncode [::http::ncode $token]
+    set xml [::http::data $token] ; list
+    # Check content-type???
+
+    ::http::cleanup $token
     if {$ncode != 200} {
-        ::http::reset $token
         set ::USGS_ERROR $save
         return "web error: $ncode"
     }
-    # Check content-type???
-    # set meta [set [set token](meta)]
+    set ::XML $xml ; list
+    lappend save xml $xml ; list
 
-    set data [::http::data $token] ; list
-    ::http::cleanup $token
-    set ::XML $data ; list
-    lappend save xml $data ; list
-
-    # Do primitive XML parsing
-    set xml [string map {&gt; > &lt; < &amp; & &apos; ; &quot; \x22} $data]
+    set elev [::USGS::ExtractElevation $xml]
+    return $elev
+}
+proc ::USGS::GetURL {lat lon} {
+    Lon2World
+    set units [expr {$::state(units,internal) eq "english" ? "Feet" : "Meters"}]
+    set url [subst https://nationalmap.gov/epqs/pqs.php?x=${lon}&y=${lat}&units=${units}&output=xml]
+    return $url
+}
+proc ::USGS::ExtractElevation {xml} {
+    set xml [string map {&gt; > &lt; < &amp; & &apos; ; &quot; \x22} $xml]
     regsub -all {<!--.*?-->} $xml {} xml
     set n [regexp {<Elevation>(.*?)</Elevation>} $xml => elev]
     if {! $n} {set ::USGS_ERROR $save; return "XML error"}
@@ -17247,14 +17285,15 @@ proc ::USGS::GetElevation {lat lon {sanityVarName ""}} {
     }
 
     # Convert result to internal units (this SHOULD be a nop)
-    set xunits Feet
-    regexp {<Units>(.*?)</Units>} $xml => xunits
-    set xunits [string toupper $xunits]
+    set units Feet
+    regexp {<Units>(.*?)</Units>} $xml => units
+    set units [string toupper $units]
     set elev [::Data::RConvert2 $elev climb \
-                  [expr {$xunits eq "FEET" ? "english" : "metric"}]]
+                  [expr {$units eq "FEET" ? "english" : "metric"}]]
     set elev [Round0 $elev]
     return $elev
 }
+
 ## EON USGS
 ## BON SAVE
 proc DumpAllData {{who ""} {fname "road.data"}} {
@@ -17326,7 +17365,7 @@ proc ::Save::SaveUserDataCmd {{quiet 0}} {
     }
     if {! $quiet && ! $state(su)} {
         set txt "Saved user data to file $fname.\n\n"
-        append txt "The data will automatically be loaded everytime \n"
+        append txt "The data will automatically be loaded everytime "
         append txt "you load the $state(zone) zone."
         DoInfo $txt "KLIMB Save User Data"
     }
@@ -23471,9 +23510,9 @@ proc ::Coords::Dlg_After {} {
     if {! [winfo exists .coords.c]} return
 
     after cancel $aid
-    set maps [info commands ::map::*]
-    set n [lsearch -glob $maps "*slippy*"] ;# Oops, not all ::maps::* are images
-    if {$n != -1} { set maps [lreplace $maps $n $n] }
+    set maps [info commands ::map::Maps*]
+    # set n [lsearch -glob $maps "*slippy*"] ;# Oops, not all ::maps::* are images
+    # if {$n != -1} { set maps [lreplace $maps $n $n] }
     set mymap [lindex $maps [expr {int(rand() * [llength $maps])}]]
     .coords.c itemconfig img -image $mymap
     set aid [after 5000 ::Coords::Dlg_After] ;# Reschedule ourselves
@@ -25269,7 +25308,7 @@ proc ::GPS::DrawWpts {wtype reCenter {annotate 0}} {
         incr isVisible [eval ::Display::IsVisible $xy]
 
         set tag2 ${tag}_$id
-        ::GPS::Symbol .c $xy $wtype [list $tag $tag2]
+        ::GPS::Symbol .c $xy $wtype [list $tag $tag2] true
 
         set short $desc
         if {$short eq "?"} { set short $name }
@@ -25531,12 +25570,18 @@ proc ::GPS::ShowInfo {id} {
 #
 # ::GPS::Symbol -- draws our symbol for a waypoint or geocache
 #
-proc ::GPS::Symbol {W xy type tag {sscale 1}} {
+proc ::GPS::Symbol {W xy type tag {icon 0}} {
     global state
+
+    if {$icon} {
+        ::Display::MakeImage ::img::geo_icon geocache_icon.gif
+        $W create image $xy -image ::img::geo_icon -tag $tag
+        return
+    }
 
     set color $state($type,color)
     set fill $state($type,fill)
-    set radius [expr {$state($type,size) * $sscale}]
+    set radius $state($type,size)
 
     set r2 [expr {sqrt($radius*$radius /2.0)}]
     foreach {X0 Y0 X1 Y1} [::Display::MakeBox $xy $radius] break
@@ -25547,11 +25592,11 @@ proc ::GPS::Symbol {W xy type tag {sscale 1}} {
         -width 2
 
     set tagx [concat $tag wx]
-    $W create line $x0 $y0 $x1 $y1 -tag $tagx -fill $color -width $sscale
-    $W create line $x0 $y1 $x1 $y0 -tag $tagx -fill $color -width $sscale
+    $W create line $x0 $y0 $x1 $y1 -tag $tagx -fill $color -width 1
+    $W create line $x0 $y1 $x1 $y0 -tag $tagx -fill $color -width 1
     foreach {x y} $xy break
-    $W create line $X0 $y  $X1 $y  -tag $tagx -fill $color -width $sscale
-    $W create line $x  $Y0 $x  $Y1 -tag $tagx -fill $color -width $sscale
+    $W create line $X0 $y  $X1 $y  -tag $tagx -fill $color -width 1
+    $W create line $x  $Y0 $x  $Y1 -tag $tagx -fill $color -width 1
 }
 
 proc ::GPS::__Node2Track {nid {tid 0,track}} {
@@ -26331,6 +26376,7 @@ proc ::Tracks::Disable {how} {
 #
 proc ::Tracks::DoIt {what args} {
     variable trackNum
+
     if {$what eq "track"} {
         after 1 {::GPS::DrawTrack $::Tracks::trackNum}
     } elseif {$what eq "profile"} {
@@ -27307,2365 +27353,2366 @@ proc ::XML::Indent {xml} {
     return $result
 }
 ## EON XML
-## BON ZOOM
-##+##########################################################################
-#
-# ::Zoom::Go -- zooms given road id
-#
-proc ::Zoom::Go {what who} {
-    variable ZMAP
-
-    ::Zoom::Init
-    if {! $::state(zoom,canDo)} return
-
-    set what [string tolower $what]
-    if {$what eq "popup"} {
-        set what $::state(popup,what)
-        set who $::state(popup,who)
-        if {$what eq "map"} {
-            set what "coords"
-            set who "map"
-        }
-    }
-    set n [lsearch -exact {road node poi geo route track coords} $what]
-    if {$n == -1} return
-
-    set ZMAP(what) $what
-    set ZMAP(who) $who
-    set ZMAP(readonly) [expr {!$::state(su) && [string range $who 0 0] ne "X"}]
-    set ZMAP(guessable) [expr {$::state(su) || ($what eq "road" \
-                                    && [string match "X*" $who])}]
-
-    ::Zoom::DoDisplay
-    ::Zoom::GetDetails $what $who
-    set ::Zoom::DS(title) $::Zoom::RINFO(title)
-    ::Zoom::MakeMap
-    ::Data::UniqueTrace ::Zoom::RINFO {::Zoom::IsModified 1}
-    ::Atlas::Reparent
-}
-##+##########################################################################
-#
-# ::Zoom::Init -- loads everything needed by the zoom feature
-#   http://terraserver-usa.com/about.aspx?n=AboutLinktoHtml
-#
-proc ::Zoom::Init {} {
-    variable STATIC
-    global state
-
-    set STATIC(maxRendered) $state(zoom,maxRendered)
-    if {[info exists state(zoom,canDo)] && ! $state(zoom,canDo)} return
-
-    set state(zoom,canDo) 0                     ;# Assume we can't do it
-    if {! [::Data::CanDo internet]} {
-        return [WARN "This feature requires the http extension"]
-    }
-    if {! $state(can,jpeg)} {
-        return [WARN "This feature requires the Img extension"]
-    }
-    if {! [::Data::CanDo pgu]} {
-        return [WARN "This feature requires KLIMB's pgu extension"]
-    }
-
-    set state(zoom,canDo) 1
-    set STATIC(url2) $STATIC(url)
-    ::Zoom::FindCache
-}
-##+##########################################################################
-#
-# ::Zoom::FindCache -- returns location of our cache directory
-#
-proc ::Zoom::FindCache {} {
-    #set ::Zoom::STATIC(cache) [file join $::state(wdir) zoom]
-    set ::Zoom::STATIC(cache) [file join $::state(zdir) zoom]
-    return $::Zoom::STATIC(cache)
-}
-##+##########################################################################
-#
-# ::Zoom::MakeMap -- sets us up for a new map to be displayed
-#
-proc ::Zoom::MakeMap {} {
-    variable DS
-    variable ZMAP
-    variable stats
-
-    #::PGU::Cancel -all
-    set ZMAP(ready) 0
-    set ZMAP(mag) [expr {$DS(mag) + 10}]
-    set ZMAP(theme) $DS(theme)
-    set ZMAP(rendered) {}                       ;# List of all rendered cells
-    incr ZMAP(sid)                              ;# Session id
-    ::Zoom::Layout
-    ::Zoom::DrawGrid
-    ::Zoom::DrawPoints
-    if {$ZMAP(what) eq "route"} {
-        ::MilePost::Go $::Zoom::W
-        ::Arrow::Go $::Zoom::W
-    }
-    if {$::state(atlas)} {
-        ::Atlas::Begin
-    }
-    update
-
-    ::Zoom::StartMapFetch
-    set ZMAP(ready) 1
-    set stats(rendered) 0
-    #::Zoom::RunAllQueues ;# this happens via Expose from scrollbar
-}
-##+##########################################################################
-#
-# ::Zoom::Canvas2Small -- converts W coordinates to W2 coordinates
-#
-proc ::Zoom::Canvas2Small {args} {
-    variable STATIC
-
-    set xy {}
-    foreach x $args {
-        lappend xy [expr {$x / $STATIC(small)}]
-    }
-    return $xy
-}
-##+##########################################################################
-#
-# Clear -- clears the map and deletes all map images
-#
-proc ::Zoom::Clear {} {
-    variable W
-    variable W2
-    variable ZMAP
-
-    if {[info exists ::nnode(l0)] && $::nnode(l0) eq "Elevation"} {
-        destroy .nnode
-    }
-    if {[winfo exist $W]} {
-        $W delete all
-        $W2 delete all
-
-        $W config -scrollregion {0 0 99999 99999}
-        $W xview moveto 0
-        $W yview moveto 0
-        update
-    }
-    foreach img [image names] {
-        if {[string match "::zoom::*" $img]} {
-            image delete $img
-        }
-    }
-    set ZMAP(rendered) {}
-}
-##+##########################################################################
-#
-# ::Zoom::MyScroller -- our scroll procedure that also gets maps
-#
-proc ::Zoom::MyScroller {xy first last} {
-    ::Zoom::GetScreenRect
-    ${::Zoom::T}.sb_$xy set $first $last
-    ::Zoom::OverviewBox
-    if {$::state(atlas)} {::ClipBox::Onscreen $::Zoom::W}
-    after idle ::Zoom::Expose
-}
-##+##########################################################################
-#
-# ::Zoom::OverviewBox -- moves overview box on the grid window
-#
-proc ::Zoom::OverviewBox {} {
-    variable W2
-    variable SCREEN
-
-    if {! [winfo exists $W2]} {
-        INFO "missing $W2"
-        return
-    }
-
-    set xy [::Zoom::Canvas2Small $SCREEN(l) $SCREEN(t) $SCREEN(r) $SCREEN(b)]
-    $W2 coords over $xy
-    ::Zoom::OverviewVisible $xy
-}
-##+##########################################################################
-#
-# ::Zoom::OverviewVisible -- keeps center of the overview box visible
-#
-proc ::Zoom::OverviewVisible {xy} {
-    variable W2
-    foreach {x0 y0 x1 y1} $xy break             ;# Coordinates of overview box
-    set x [expr {($x0 + $x1) / 2}]              ;# Center of overview box
-    set y [expr {($y0 + $y1) / 2}]
-
-    foreach {l t r b} [::Display::GetScreenRect $W2] break
-    if {$x <= $r && $y <= $b && $x >= $l && $y >= $t} return ;# Visible
-    foreach {l t r b} [$W2 cget -scrollregion] break
-    set cw [winfo width $W2]
-    set ch [winfo height $W2]
-
-    set xview [expr {(($x - $cw/2.0) - $l) / ($r - $l)}]
-    set yview [expr {(($y - $ch/2.0) - $t) / ($b - $t)}]
-
-    $W2 xview moveto $xview
-    $W2 yview moveto $yview
-}
-##+##########################################################################
-#
-# ::Zoom::GetScreenRect -- gets coordinates of the visible part of the canvas
-#
-proc ::Zoom::GetScreenRect {} {
-    variable SCREEN
-    variable W
-
-    foreach {sl st sr sb} [$W cget -scrollregion] break
-    set sw [expr {$sr - $sl}]                   ;# Scroll width
-    set sh [expr {$sb - $st}]                   ;# Scroll height
-
-    # Get canvas info (could have used scrollbar for this)
-    foreach {xl xr} [$W xview] break
-    foreach {yt yb} [$W yview] break
-
-    set SCREEN(l) [expr {round($sl + $xl * $sw)}]
-    set SCREEN(r) [expr {round($sl + $xr * $sw)}]
-    set SCREEN(t) [expr {round($st + $yt * $sh)}]
-    set SCREEN(b) [expr {round($st + $yb * $sh)}]
-
-    set SCREEN(w) [expr {$SCREEN(r) - $SCREEN(l)}]
-    set SCREEN(h) [expr {$SCREEN(b) - $SCREEN(t)}]
-
-    set SCREEN(rows) [expr {int(ceil($SCREEN(h) / 200.0))}]
-    set SCREEN(cols) [expr {int(ceil($SCREEN(w) / 200.0))}]
-}
-##+##########################################################################
-#
-# ::Zoom::Layout -- figures out cells that are on the map
-#
-proc ::Zoom::Layout {} {
-    variable SCREEN
-    variable ZMAP
-    variable RINFO
-
-    ::Zoom::Clear
-    set core [::Zoom::GetCellsOverCore]
-
-    foreach {ZMAP(o,x) ZMAP(o,y)} [lindex $core 0] break
-    incr ZMAP(o,x) -1 ; incr ZMAP(o,y) 2        ;# Put in center of window
-
-    foreach {t l b r} [::Zoom::GetBbox $core] break
-    set extra [expr {$SCREEN(cols) - ($r - $l + 1)}]
-    if {$extra > 0} {
-        incr l [expr {-int(ceil($extra / 2.0))}]
-        incr r [expr {$extra / 2}]
-    }
-    set extra [expr {$SCREEN(rows) - ($t - $b + 1)}]
-    if {$extra > 0} {
-        incr t [expr {int(ceil($extra / 2.0))}]
-        incr b [expr {-($extra / 2)}]
-    }
-    incr t ; incr l -1                          ;# Supply a margin
-    incr b -1 ; incr r
-    set ZMAP(cells) [::Zoom::GetInnerCells [list $l $t] [list $r $b]]
-    set ZMAP(bbox) [list $t $l $b $r]
-    set ZMAP(core) $core
-    set ZMAP(width) [expr {$r - $l + 1}]
-    set ZMAP(height) [expr {$t - $b + 1}]
-    set ZMAP(zone) [lindex $RINFO(pts) 0 6 2]
-}
-##+##########################################################################
-#
-# ::Zoom::GetDetails -- gets meta info about road or node
-#
-proc ::Zoom::GetDetails {what who} {
-    variable RINFO
-
-    array unset ::Zoom::RINFO
-    set RINFO(what) $what
-    set RINFO(who) $who
-    if {$what eq "road"} {
-        ::Zoom::GetRoadInfo $who
-    } elseif {$what eq "node"} {
-        ::Zoom::GetNodeInfo $who
-    } elseif {$what eq "route"} {
-        ::Zoom::GetRouteInfo
-    } elseif {$what eq "track"} {
-        ::Zoom::GetTrackInfo $who
-    } elseif {$what eq "coords"} {
-        ::Zoom::GetCoordsInfo $who
-    } elseif {$what eq "poi" || $what eq "geo"} {
-        ::Zoom::GetPOIInfo $what $who
-    }
-
-    ::Zoom::SwapNodeRoad $what
-    ::Zoom::DisplayReadOnly
-    ::Zoom::IsModified 0
-}
-##+##########################################################################
-#
-# ::Zoom::GetRoadInfo -- fills in RINFO w/ data about the road
-#
-proc ::Zoom::GetRoadInfo {who} {
-    variable RINFO
-
-    set RINFO(pts) [::Route::GetXYZ $who]       ;# All the bends in the road
-    foreach {. . RINFO(north) RINFO(dist) RINFO(south) RINFO(type) \
-                 RINFO(title)} $::roads($who) break
-    ::Zoom::GuessDistance
-    ::Zoom::GuessClimbing
-}
-##+##########################################################################
-#
-# ::Zoom::GetNodeInfo -- fills in RINFO w/ data about the node
-#
-proc ::Zoom::GetNodeInfo {who} {
-    variable RINFO
-
-    set RINFO(pts) [::Route::GetXYZ "" $who]
-    foreach {RINFO(title) RINFO(ele) lat lon} [lindex $RINFO(pts) 0] break
-    set usgs [lindex $RINFO(pts) 0 8]
-    if {$usgs eq {}} {set usgs "0+?"}
-    set RINFO(usgs) [::Data::Label $usgs climb 3 2]
-
-    set utm [::Data::ll2utm $lat $lon]
-    lset RINFO(pts) 0 6 $utm
-}
-##+##########################################################################
-#
-# ::Zoom::GetPOIInfo -- Gets info about a POI
-#
-proc ::Zoom::GetPOIInfo {what who} {
-    variable RINFO
-    global poi
-
-    if {$what eq "poi"} {
-        foreach {RINFO(type) RINFO(title) lat lon RINFO(loc) RINFO(desc)} \
-            $poi($who) break
-        set utm [::Data::ll2utm $lat $lon]
-        set RINFO(pts) [list [list $RINFO(title) ? $lat $lon poi $who $utm]]
-        return
-    }
-    if {$what eq "geo"} {
-        foreach {lat lon . RINFO(title)} $::GPS::wpts($who) break
-        set utm [::Data::ll2utm $lat $lon]
-        set RINFO(pts) [list [list $RINFO(title) ? $lat $lon geo $who $utm]]
-        return
-    }
-}
-##+##########################################################################
-#
-# ::Zoom::GetRouteInfo -- fills in RINFO w/ data about the current route
-#
-proc ::Zoom::GetRouteInfo {} {
-   variable RINFO
-
-    set RINFO(pts) [::Route::GetXYZ]
-    set RINFO(title) "Current Route"
-    set RINFO(dist) $::msg(dist2)
-    set RINFO(climb) $::msg(climb2)
-    set RINFO(desc) $::msg(desc2)
-    set ::Zoom::ZMAP(readonly) 1
-}
-##+##########################################################################
-#
-# ::Zoom::GetTrackInfo -- fills RINFO w/ data about a GPS track
-#
-proc ::Zoom::GetTrackInfo {who} {
-    variable RINFO
-
-    set rpts [::GPS::GetXYZ $who]
-    set wpts [::GPS::GetWpts]
-    set RINFO(pts) [concat $rpts $wpts]
-
-    #set all [::Tracks::GetInfo $who]
-
-    foreach var [list title dist climb desc] val [::Tracks::GetInfo $who] {
-        set RINFO($var) $val
-    }
-    set ::Zoom::ZMAP(readonly) 1
-}
-##+##########################################################################
-#
-# ::Zoom::GetCoordsInfo -- fills RINFO w/ data about current coord
-# can be called from coordinate locator or directly from map popup
-#
-proc ::Zoom::GetCoordsInfo {who} {
-    variable RINFO
-
-    set RINFO(title) "User Coordinates"
-    if {$who eq "map"} {
-        foreach {x y} $::state(popup) break
-        foreach {. . . . lat lon} [::Display::canvas2pos $x $y] break
-        set lat [int2lat $lat]
-        set lon [int2lat $lon]
-    } else {
-        foreach {lat lon} [::Coords::Where] break
-    }
-    foreach {RINFO(lat) RINFO(lon)} [::Display::PrettyLat $lat $lon] break
-    set lat [eval lat2int $lat]
-    set lon [eval lat2int $lon]
-
-    set RINFO(pts) [list [list "" ? $lat $lon coords "" ""]]
-    set ::Zoom::ZMAP(readonly) 1
-}
-##+##########################################################################
-#
-# ::Zoom::GetInnerCells -- returns list of all cells w/i x0,y0 - x1,y1
-#
-proc ::Zoom::GetInnerCells {xy0 xy1} {
-    foreach {x0 y0} $xy0 {x1 y1} $xy1 break
-    if {$x0 > $x1} {foreach x0 $x1 x1 $x0 break}
-    if {$y0 > $y1} {foreach y0 $y1 y1 $y0 break}
-
-    set cells {}
-    for {set x $x0} {$x <= $x1} {incr x} {
-        for {set y $y1} {$y >= $y0} {incr y -1} {
-            lappend cells [list $x $y]
-        }
-    }
-    return $cells
-}
-##+##########################################################################
-#
-# ::Zoom::GetCoreCells -- gets cells along straight line from two points
-#
-proc ::Zoom::GetCoreCells {x0 y0 x1 y1} {
-    set dx [expr {abs($x1 - $x0) / 2.0}]
-    set dy [expr {abs($y1 - $y0) / 2.0}]
-
-    if {$dx > 1 || $dy > 1} {
-        set x2 [expr {($x0 + $x1) / 2}]
-        set y2 [expr {($y0 + $y1) / 2}]
-
-        set cells1 [::Zoom::GetCoreCells $x0 $y0 $x2 $y2]
-        set cells2 [::Zoom::GetCoreCells $x2 $y2 $x1 $y1]
-        set cells [concat $cells2 $cells1]
-    } else {
-        set cells [::Zoom::GetInnerCells [list $x0 $y0] [list $x1 $y1]]
-    }
-    return $cells
-}
-##+##########################################################################
-#
-# ::Zoom::ShowCore -- debugging routines highlight core cells
-# in the status window
-#
-proc ::Zoom::ShowCore {} {
-    variable ZMAP
-
-    foreach cell $ZMAP(core) {
-        foreach {x y} $cell break
-        ::Zoom::Status $x $y cancel
-    }
-}
-##+##########################################################################
-#
-# ::Zoom::GetCellsOverCore -- returns list of cells to cover all pts
-#
-proc ::Zoom::GetCellsOverCore {} {
-    variable RINFO
-
-    # Convert all to UTM and get bounding box
-    unset -nocomplain mcells
-    set idx -1
-    foreach pt $RINFO(pts) {
-        incr idx
-        foreach {name ele lat lon type who utm} $pt break
-        if {$utm eq ""} {
-            set utm [::Data::ll2utm $lat $lon]
-            lset RINFO(pts) $idx 6 $utm
-        }
-        set xy1 [lrange [::Zoom::ChunkUTM $utm] 0 1]
-        if {$idx == 0} {
-            set org $xy1
-            set mcells($xy1) 1
-        } else {
-            foreach cell [eval ::Zoom::GetCoreCells $xy0 $xy1] {
-                set mcells($cell) 1
-            }
-        }
-        set xy0 $xy1
-    }
-    unset mcells($org)          ;# Put origin first
-    return [concat [list $org] [array names mcells]]
-}
-##+##########################################################################
-#
-# ::Zoom::GetBbox -- gets bounding box for a set of cells
-#
-proc ::Zoom::GetBbox {cells} {
-    set first [lindex $cells 0]
-    foreach {x y} $first break
-    set t [set b $y]
-    set l [set r $x]
-
-    foreach cell $cells {
-        foreach {x y} $cell break
-        if {$y > $t} { set t $y } elseif {$y < $b} { set b $y}
-        if {$x > $r} { set r $x } elseif {$x < $l} { set l $x}
-    }
-    return [list $t $l $b $r]
-}
-##+##########################################################################
-#
-# ::Zoom::ChunkUTM -- takes a UTM coord and a scale and returns
-# the chunk values that terra server wants to fetch that page. It also
-# returns the excess into that chunk.
-#
-# NB. returns x,y NOT northing, easting
-#
-proc ::Zoom::ChunkUTM {utm {sscale -1}} {
-    if {$sscale == -1} {set sscale $::Zoom::ZMAP(mag)}
-
-    foreach {north east . letter} $utm break
-
-    set mult [expr {int(100 * pow(2,$sscale-9))}]
-    set eX [expr {$east / double($mult)}]
-    set eY [expr {$north / double($mult)}]
-    set XX [expr {int($eX)}]
-    set YY [expr {int($eY)}]
-
-    return [list $XX $YY $eX $eY]
-}
-##+##########################################################################
-#
-# ::Zoom::Close -- cleans up and closes all the zoom windows
-#
-proc ::Zoom::Close {} {
-    ::PGU::Cancel
-    ::Zoom::Clear
-    destroy $::Zoom::T
-    ::Atlas::Reparent
-}
-##+##########################################################################
-#
-# DrawGrid -- draws the grid laid out by MakeLayout
-#
-proc ::Zoom::DrawGrid {} {
-    variable ZMAP
-    variable W
-    variable W2
-    variable COLORS
-
-    $W delete cell
-    catch {$W2 delete cell}
-    set ww [expr {$ZMAP(width) * 200.0 / ([winfo width $W2] - 5)}]
-    set hh [expr {$ZMAP(height) * 200.0 / ([winfo height $W2] - 5)}]
-    set small [expr {$ww > $hh ? $ww : $hh}]
-    if {$small > 30} {set small 30.0}
-    set ::Zoom::STATIC(small) $small
-
-    foreach cell $ZMAP(cells) {
-        foreach {XX YY} $cell break
-        set xy [::Zoom::CellBox $XX $YY]
-        $W create rect $xy -tag [list cell cell$XX,$YY]
-        set xys [eval ::Zoom::Canvas2Small $xy]
-        $W2 create rect $xys -tag [list cell cell$XX,$YY] -fill $COLORS(empty)
-
-        #continue
-        # This draws id in each cell
-        foreach {x0 y0 x1 y1} $xy break
-        set x [expr {($x0 + $x1) / 2}]
-        set y [expr {($y0 + $y1) / 2}]
-        $W create text $x $y -tag cell -text "$XX,$YY" -font {Helvetica 18 bold}
-    }
-    $W config -scrollregion [$W bbox all]
-    $W2 config -scrollregion [$W2 bbox all]
-    $W2 create rect -1000 -1000 -1000 -1000 -tag over -width 4
-}
-##+##########################################################################
-#
-# CellBox -- returns coordinates of a given cell
-#
-proc ::Zoom::CellBox {XX YY {z 0}} {
-    set xy1 [::Zoom::Chunk2canvas $XX [expr {$YY+1}] $z] ;# Upper left corner
-    set xy2 [::Zoom::Chunk2canvas [expr {$XX+1}] $YY $z] ;# Lower right corner
-    return [concat $xy1 $xy2]
-}
-##+##########################################################################
-#
-# ::Zoom::Chunk2canvas -- returns x,y of lower left corner of a chunk
-#
-proc ::Zoom::Chunk2canvas {XX YY {small 0}} {
-    variable ZMAP
-    variable STATIC
-
-    set z [expr {$small ? $STATIC(small) : 1}]
-    set x [expr {200 * ($XX-$ZMAP(o,x)) / $z}]
-    set y [expr {200 * ($ZMAP(o,y)-$YY) / $z}]
-    return [list $x $y]
-}
-##+##########################################################################
-#
-# ::Zoom::DrawPoints -- draws all the points in RINFO(pts)
-#
-proc ::Zoom::DrawPoints {} {
-    variable ZMAP
-    variable RINFO
-    variable W
-    variable W2
-    global nodes state
-
-    $W delete route
-    $W2 delete route
-
-    set bindAll [expr {$ZMAP(what) ne "road"}]
-    set xy {}
-    set xys {}
-    set cnt -1
-    set color $state(n,0,color)
-    foreach pt $RINFO(pts) {
-        incr cnt
-        foreach {name ele lat lon type who utm} $pt break
-        foreach {x y} [::Zoom::utm2canvas $utm] break
-        lappend xy $x $y
-        foreach {xs ys} [::Zoom::utm2canvas $utm 1] break
-        lappend xys $xs $ys
-
-        set tag pt_$cnt
-        set tag2 ppt_$cnt
-        ::Balloon::Delete [list $W $tag]
-        ::Balloon::Delete [list $W2 $tag]
-
-        if {$type eq "waypoint"} {
-            set item [expr {[string match "X*" $who] ? "rect" : "oval"}]
-            set coords [::Display::MakeBox [list $x $y] $state(n,size)]
-            $W create $item $coords -tag [list route node $tag] -fill $color
-
-            set coords2 [::Display::MakeBox [list $xs $ys] 5]
-            $W2 create $item $coords2 -tag [list route node $tag] -fill $color
-
-            set txt ""
-            regexp {[A-Za-z0-9]+} [string map {n {} N {}} $who] txt
-            if {$state(n,size) > 8} {
-                $W create text $x $y -tag [list route node $tag] \
-                    -font {times 8} -text $txt
-            }
-            if {$::state(me) && $ZMAP(what) eq "node"} {
-                foreach {x0 y0 x1 y1} $coords break
-                $W create line $x0 $y0 $x1 $y1 -tag [list route node a $tag] \
-                    -width 2
-                $W create line $x0 $y1 $x1 $y0 -tag [list route node a $tag] \
-                    -width 2
-            }
-
-            ::Balloon::Create [list $W $tag] node $who "" ""
-            ::Balloon::Create [list $W2 $tag] node $who "" ""
-            if {$bindAll && ! $ZMAP(readonly)} {
-                $W bind $tag <Button-1> \
-                    [list ::Zoom::MoveNode down $tag $cnt %x %y]
-                $W bind $tag <B1-Motion> \
-                    [list ::Zoom::MoveNode move $tag $cnt %x %y]
-            }
-        } elseif {$type eq "trackpoint"} {
-            set coords [::Display::MakeBox [list $x $y] $state(n,size)]
-            $W create oval $coords -tag [list trackpoint $tag] -fill $color
-            set coords2 [::Display::MakeBox [list $xs $ys] 5]
-            $W2 create oval $coords2 -tag [list trackpoint $tag] -fill $color
-            set xy [lrange $xy 0 end-2]
-            set xys [lrange $xys 0 end-2]
-
-            ::Balloon::Create [list $W $tag] trkpt $name $name $name
-            ::Balloon::Create [list $W2 $tag] trkpt $name $name $name
-        } elseif {$type eq "poi"} {
-            set coords [::Display::MakeStar [list $x $y] \
-                            [expr {2*$state(p,size)}]]
-            $W create poly $coords -fill $state(p,color) \
-                -tag [list route node $tag]
-            set coords [::Display::MakeStar [list $xs $ys] 10]
-            $W2 create poly $coords -fill $state(p,color) \
-                -tag [list route node $tag]
-            ::Balloon::Create [list $W $tag] poi $who
-            ::Balloon::Create [list $W2 $tag] poi $who
-
-            if {$bindAll && ! $ZMAP(readonly)} {
-                $W bind $tag <Button-1> \
-                    [list ::Zoom::MoveNode down $tag $cnt %x %y]
-                $W bind $tag <B1-Motion> \
-                    [list ::Zoom::MoveNode move $tag $cnt %x %y]
-            }
-        } elseif {$type eq "geo"} {
-            ::GPS::Symbol $W [list $x $y] g [list route geo $tag] 2
-            ::GPS::Symbol $W2 [list $xs $ys] g [list route geo $tag]
-            ::Balloon::Create [list $W $tag] wpt $who
-            ::Balloon::Create [list $W2 $tag] wpt $who
-            if {$bindAll && ! $ZMAP(readonly)} {
-                $W bind $tag <Button-1> \
-                    [list ::Zoom::MoveNode down $tag $cnt %x %y]
-                $W bind $tag <B1-Motion> \
-                    [list ::Zoom::MoveNode move $tag $cnt %x %y]
-            }
-        } elseif {$type eq "coords"} {
-            set ltag [list route node $tag]
-            $W create line $x -99999 $x 99999 -tag $ltag -width 2
-            $W create line -99999 $y 99999 $y -tag $ltag -width 2
-            $W2 create line $xs -99999 $xs 99999 -tag $ltag -width 2
-            $W2 create line -99999 $ys 99999 $ys -tag $ltag -width 2
-
-            set coords [::Display::MakeBox [list $x $y] $state(n,size)]
-            $W create oval $coords -tag $ltag -fill $color -width 2
-
-            set coords [::Display::MakeBox [list $xs $ys] 5]
-            $W2 create oval $coords -tag $ltag -fill $color -width 2
-
-        } else {                                ;# Routepoints
-            set coords [::Display::MakeBox [list $x $y] 4]
-            $W create oval $coords -tag [list route rtept $tag] -fill $color
-            if {[string is double -strict $ele]} {
-                $W create oval [::Display::MakeBox [list $x $y] 1] -fill black \
-                    -tag [list route rtept $tag $tag2]
-            }
-
-            set coords [::Display::MakeBox [list $xs $ys] 3]
-            $W2 create oval $coords -fill $color -tag [list route rtept $tag]
-
-            $W bind $tag <<MenuMousePress>> \
-                [list ::Zoom::DoPopupMenu %x %y rtept $cnt]
-            if {! $ZMAP(readonly)} {
-                $W bind $tag <Control-Button-2> \
-                    [list ::Zoom::DoPopupMenu %x %y delete $cnt]
-                $W bind $tag <Button-1> \
-                    [list ::Zoom::MoveNode down $tag $cnt %x %y]
-                $W bind $tag <B1-Motion> \
-                    [list ::Zoom::MoveNode move $tag $cnt %x %y]
-            }
-        }
-    }
-    if {[llength $xy] > 2} {
-        set clr $state(r,0,9,color)
-        set width $state(r,0,9,width)
-        $W create line $xy -tag {route road} -fill $clr -width $width
-        $W2 create line $xys -tag {route road} -fill $clr -width $width
-        ::Balloon::Create [list $W road] road $who "" ""
-        ::Balloon::Create [list $W2 road] road $who "" ""
-    }
-    $W raise node
-    $W raise geo
-    $W raise rtept
-    $W raise trackpoint
-    $W raise milepost
-    $W raise arrow
-    $W raise zoom
-    $W raise BOX
-    $W2 raise node
-    $W2 raise geo
-    $W2 raise rtept
-    $W2 raise trackpoint
-    if {$ZMAP(mag) > 13} { $W lower rtept }
-
-    bind $W <Control-Button-1> break            ;# Disable bend road buttons
-    bind $W <Control-Button-2> break
-
-    $W bind img <<MenuMousePress>> "::Zoom::DoPopupMenu %x %y map; break"
-    if {$ZMAP(what) eq "node"} {
-        $W bind road <<MenuMousePress>> {::Zoom::DoPopupMenu %x %y node; break}
-        if {! $ZMAP(readonly)} {
-            $W bind node <Enter> [list $W config -cursor hand2]
-            $W bind node <Leave> [list $W config -cursor {}]
-        }
-    } else {
-        $W bind road <<MenuMousePress>> {::Zoom::DoPopupMenu %x %y road; break}
-        if {! $ZMAP(readonly)} {
-            $W bind road <Control-Button-3> {::Zoom::DoPopupMenu %x %y add; break}
-            $W bind img <Control-Button-3> {::Zoom::DoPopupMenu %x %y add; break}
-            $W bind rtept <Enter> [list $W config -cursor hand2]
-            $W bind rtept <Leave> [list $W config -cursor {}]
-        }
-    }
-}
-##+##########################################################################
-#
-# ::Zoom::MoveNode -- moves a route point to the mouse position
-#
-proc ::Zoom::MoveNode {what tag idx x y} {
-    variable ZMAP
-    variable RINFO
-    variable W
-    variable W2
-    variable lcxy                               ;# Last cursor xy
-
-    if {$ZMAP(readonly) || ! $ZMAP(ready)} return
-    set cx [$W canvasx $x]
-    set cy [$W canvasy $y]
-    set cxy [list $cx $cy]
-
-    if {$what eq "down"} {
-        set lcxy $cxy
-        ::Balloon::Cancel
-        return
-    } elseif {$what eq "up"} {
-        # Enable balloon help
-    }
-
-    foreach {dx dy} $lcxy break
-    set lcxy $cxy
-
-    # Move the node
-    set dx [expr {$cx - $dx}]
-    set dy [expr {$cy - $dy}]
-    $W move $tag $dx $dy
-    eval $W2 move $tag [::Zoom::Canvas2Small $dx $dy]
-
-    # Move the road
-    set xy [$W coords road]
-    if {$xy ne {}} {
-        lset xy [expr {2 * $idx}] $cx
-        lset xy [expr {2 * $idx + 1}] $cy
-        $W coords road $xy
-    }
-
-    set xy [$W2 coords road]
-    if {$xy ne {}} {
-        foreach {sx sy} [::Zoom::Canvas2Small $cx $cy] break
-        lset xy [expr {2 * $idx}] $sx
-        lset xy [expr {2 * $idx + 1}] $sy
-        $W2 coords road $xy
-    }
-
-    # Update the points list
-    # NB. don't use cx,cy because that's anywhere on the circle
-    foreach {x0 y0} [::Data::BboxCenter [$W bbox $tag]] break
-    set utm [::Zoom::canvas2utm $x0 $y0]
-    lset RINFO(pts) $idx 6 $utm                 ;# Put in new UTM position
-    lset RINFO(pts) $idx 2 0                    ;# Erase lat/lon position
-    lset RINFO(pts) $idx 3 0
-    if {[lindex $RINFO(pts) $idx 1] ne "?"} {
-        lset RINFO(pts) $idx 1 ?                ;# Destroy elevation info
-        $W delete ppt_$idx
-    }
-    ::Zoom::IsModified 1
-    ::Zoom::GuessDistance
-    ::Zoom::GuessClimbing
-
-    set RINFO(usgs) ?
-}
-##+##########################################################################
-#
-# ::Zoom::GuessDistance -- how long the road is
-#
-proc ::Zoom::GuessDistance {} {
-    variable RINFO
-    variable ZMAP
-
-    set RINFO(guess,dist) ""
-    if {$ZMAP(what) ne "road"} return
-
-    set lat0 -1
-    set dist 0
-
-    set idx -1
-    foreach pt $RINFO(pts) {
-        incr idx
-        foreach {. . lat1 lon1 . . utm} $pt break
-        if {$lat1 == 0} {                       ;# In utm
-            foreach {lat1 lon1} [eval ::Data::utm2ll $utm] break
-            lset RINFO(pts) $idx 2 $lat1
-            lset RINFO(pts) $idx 3 $lon1
-        }
-
-        if {$lat0 != -1} {
-            set d [::Data::Distance $lat0 $lon0 $lat1 $lon1]
-            set dist [expr {$dist + $d}]
-        }
-        set lat0 $lat1
-        set lon0 $lon1
-    }
-    set RINFO(guess,dist) [::Data::Convert [Round1 $dist] dist]
-}
-##+##########################################################################
-#
-# ::Zoom::GuessClimbing -- computes climbing for a road smoothing
-# out small bumps.
-#
-proc ::Zoom::GuessClimbing {} {
-    variable RINFO
-    variable ZMAP
-
-    set RINFO(guess,north) "?"
-    set RINFO(guess,south) "?"
-    if {$ZMAP(what) ne "road"} return
-
-    set z {}
-    foreach pt $RINFO(pts) {
-        set alt [lindex $pt 1]
-        if {[string is double -strict $alt]} {
-            lappend z $alt
-        }
-    }
-    if {[llength $z] < 2} return                ;# Not enough data points
-
-    foreach {climb desc} [::Data::PreCalcClimb $z] break
-    set RINFO(guess,north) $desc
-    set RINFO(guess,south) $climb
-}
-##+##########################################################################
-#
-# utm2canvas -- converts from utm into canvas coordinates
-#
-proc ::Zoom::utm2canvas {utm {small 0}} {
-    foreach {. . eX eY} [::Zoom::ChunkUTM $utm] break
-    foreach {x y} [::Zoom::Chunk2canvas $eX $eY $small] break
-    return [list $x $y]
-}
-proc ::Zoom::ll2canvas {lat lon} {
-    set utm [::Data::ll2utm $lat $lon]
-    return [::Zoom::utm2canvas $utm]
-}
-##+##########################################################################
-#
-# ::Zoom::NewMag -- handles changing zoom level
-#
-proc ::Zoom::NewMag {delta} {
-    variable ZMAP
-    variable DS
-
-    if {! $ZMAP(ready)} return
-    if {$delta < 0 && $DS(mag) > 0} {
-        if {$DS(theme) ne "topo" || $DS(mag) > 1} {
-            incr DS(mag) -1
-        }
-    } elseif {$delta > 0 && $DS(mag) < 9} {
-        incr DS(mag)
-    }
-
-    if {$DS(mag) + 10 == $ZMAP(mag)} return     ;# Hasn't changed
-    ::Zoom::MakeMap
-}
-##+##########################################################################
-#
-# NewTheme -- Handles changing between topo and aerial views
-#
-proc ::Zoom::NewTheme {} {
-    variable ZMAP
-    variable DS
-
-    if {$DS(theme) eq "topo"} {
-        raise $::Zoom::T.left.b-2_cover         ;# Hide illegal mag level
-        raise $::Zoom::T.left.b-1_cover
-        raise $::Zoom::T.left.b0_cover
-        if {$DS(mag) <= 0} {                    ;# Not legal mag value
-            set DS(mag) 1
-        }
-    } elseif {$DS(theme) eq "aerial"} {
-        raise $::Zoom::T.left.b-2_cover         ;# Hide illegal mag level
-        raise $::Zoom::T.left.b-1_cover
-        lower $::Zoom::T.left.b0_cover
-        if {$DS(mag) < 0} {                     ;# Not legal mag value
-            set DS(mag) 0
-        }
-        if {$DS(mag) == 1} {
-            set DS(mag) 0
-        }
-    } else {                                    ;# Urban
-        lower $::Zoom::T.left.b-2_cover
-        lower $::Zoom::T.left.b-1_cover
-        lower $::Zoom::T.left.b0_cover
-        if {$DS(mag) == 1} {
-            set DS(mag) 0
-        }
-    }
-    if {! $ZMAP(ready)} return
-    if {$DS(theme) eq $ZMAP(theme) && $DS(mag) + 10 == $ZMAP(mag)} return
-    ::Zoom::MakeMap
-    return
-}
-##+##########################################################################
-#
-# ::Zone::DoDisplay -- Creates our GUI
-#
-proc ::Zoom::DoDisplay {} {
-    global state
-    variable T
-    variable W
-    variable W2
-    variable DS
-    variable SCREEN
-    variable RINFO
-
-    if {[winfo exists $T]} {
-        ::Zoom::Clear
-        raise $T
-        set txt "Save [string totitle $::Zoom::ZMAP(what)] Data"
-        .sr_popup entryconfig 9 -label $txt
-        return
-    }
-
-    destroy $T
-    toplevel $T
-    wm geom $T +10+10
-    wm title $T "$::state(progname) Zoom"
-    wm transient $T .
-    wm protocol $T WM_DELETE_WINDOW ::Zoom::Close
-
-    set W "$T.c"
-
-    ::tk::frame $T.main -borderwidth 2 -relief ridge -background beige
-    ::my::frame $T.ctrl -borderwidth 2 -relief ridge -pad 5
-
-    ::my::label $T.title -background beige -borderwidth 0 \
-        -font bolderFont -anchor c -textvariable ::Zoom::DS(title) -pad 5
-    ::tk::frame $T.left -bg beige
-    ::ttk::scrollbar $T.sb_x -command [list $W xview] -orient horizontal
-    ::ttk::scrollbar $T.sb_y -command [list $W yview] -orient vertical
-    canvas $W -width $SCREEN(w) -height $SCREEN(h) -highlightthickness 0 \
-        -bg $::Zoom::COLORS(empty) -bd 0
-    $W config -xscrollcommand [list ::Zoom::MyScroller x]
-    $W config -yscrollcommand [list ::Zoom::MyScroller y]
-    $W config -scrollregion [list 0 0 [$W cget -width] [$W cget -height]]
-
-    # Road info
-    ::ttk::frame $T.data
-    ::Zoom::MakeRoadFrame $T.data
-    ::Zoom::MakeNodeFrame $T.data
-    ::Zoom::MakePOIFrame $T.data
-    ::Zoom::MakeGEOFrame $T.data
-    ::Zoom::MakeRouteFrame $T.data route
-    ::Zoom::MakeRouteFrame $T.data track
-    ::Zoom::MakeCoordsFrame $T.data
-
-    # Map status
-    ::my::labelframe $T.zgrid -text "Map Status"
-    set W2 "$T.zgrid.c"
-    ::ttk::scrollbar $T.zgrid.sb_x -command [list $W2 xview] -orient horizontal
-    ::ttk::scrollbar $T.zgrid.sb_y -command [list $W2 yview] -orient vertical
-    canvas $W2 -width 200 -height 200 -yscrollcommand [list $T.zgrid.sb_y set] \
-        -xscrollcommand [list $T.zgrid.sb_x set] -highlightthickness 0 \
-        -scrollregion {0 0 200 200}
-    ::Display::TileBGFix $W2
-    grid rowconfigure $T.zgrid 0 -minsize 10
-    grid $W2 $T.zgrid.sb_y -sticky news -row 1
-    grid $T.zgrid.sb_x -sticky news
-    grid rowconfigure $T.zgrid 1 -weight 1
-    grid columnconfigure $T.zgrid 0 -weight 1
-
-    # Legend
-    ::my::labelframe $T.zlegend -text "Map Legend"
-    set WW $T.zlegend
-    set items {Queued queued Fetching pending Retrieved done  \
-                   Web web Cache cache Empty empty \
-                   Timeout timeout Failure failure Discarded discarded}
-    set row 1
-    set col 0
-    foreach {txt color} $items {
-        ::tk::label $WW.$color -text $txt -anchor c -bd 1 -relief solid \
-            -bg $::Zoom::COLORS($color) -font boldFont
-        if {$::Zoom::COLORS($color) eq "blue"} { $WW.$color config -fg white}
-        grid $WW.$color -row $row -column $col -sticky ew -padx 5 -pady 2
-        if {[incr col] >= 3} {
-            incr row
-            set col 0
-        }
-    }
-    grid columnconfigure $WW {0 1 2} -weight 1 -uniform a
-    grid rowconfigure $WW 100 -minsize 5
-
-    # Internet statistics
-    ::my::labelframe $T.stats -text "Internet Statistics" -pad 5
-    ::my::label $T.lqueue -text Queued -anchor w
-    ::my::label $T.equeue -textvariable ::Zoom::stats(queued) -relief sunken \
-        -width 5 -anchor c
-    ::my::label $T.lload -text Loading -anchor w
-    ::my::label $T.eload -textvariable ::Zoom::stats(loading) -relief sunken \
-        -width 5 -anchor c
-    ::my::label $T.lretrieve -text Retrieved -anchor w
-    ::my::label $T.eretrieve -textvariable ::Zoom::stats(retrieved) \
-        -width 5 -relief sunken -anchor c
-    ::my::label $T.lrendered -text Rendered -anchor w
-    ::my::label $T.erendered -textvariable ::Zoom::stats(rendered) \
-        -width 5 -relief sunken -anchor c
-    grid $T.lqueue $T.equeue -in $T.stats -sticky ew
-    grid $T.lload $T.eload -in $T.stats -sticky ew
-    grid $T.lretrieve $T.eretrieve -in $T.stats -sticky ew
-    grid $T.lrendered $T.erendered -in $T.stats -sticky ew
-    grid columnconfigure $T.stats 0 -weight 1
-    grid columnconfigure $T.stats 5 -minsize 5
-
-    # Buttons
-    ::my::frame $T.buttons -borderwidth 2 -relief ridge
-    ::ttk::button $T.buttons.print -text "Print" -command [list ::Print::Dialog zoom]
-    ::ttk::button $T.buttons.save -text "Update" -command ::Zoom::Save -state disabled
-    ::ttk::button $T.buttons.dismiss -text "Dismiss" -command ::Zoom::Close
-    ::ttk::button $T.buttons.view -text "Google Maps" -command [list ::Zoom::Google zoom]
-
-    grid x $T.buttons.print x $T.buttons.view x -pady 5 -sticky ew
-    grid x $T.buttons.save x $T.buttons.dismiss x -pady 5 -sticky ew
-    grid columnconfigure $T.buttons {0 2 4} -weight 1
-    grid columnconfigure $T.buttons {1 3} -uniform a
-
-    # Grid outer frames
-    grid $T.main $T.ctrl -sticky news
-    grid columnconfigure $T 0 -weight 1
-    grid rowconfigure $T 0 -weight 1
-
-    # Grid main window
-    grid x $T.title x -in $T.main -sticky news -row 0
-    grid $T.left $W $T.sb_y -in $T.main -sticky news
-    grid ^ $T.sb_x x -in $T.main -sticky ew
-    grid columnconfigure $T.main 1 -weight 1
-    grid rowconfigure $T.main 1 -weight 1
-
-
-    # Grid the control frame
-    grid $T.data -in $T.ctrl -sticky news -pady 5
-    grid $T.zgrid -in $T.ctrl -sticky news -pady 5
-    grid $T.zlegend -in $T.ctrl -sticky news -pady 5
-    grid $T.stats -in $T.ctrl -sticky news -pady 5
-    grid rowconfigure $T.ctrl 100 -weight 1
-    grid $T.buttons -in $T.ctrl -sticky news -row 101
-
-    # Set up bindings
-    bind $W <2> [bind Text <2>]                 ;# Enable dragging w/ <2>
-    bind $W <B2-Motion> [bind Text <B2-Motion>]
-    $W bind img <1> [bind $W <2>]
-    $W bind img <B1-Motion> [bind $W <B2-Motion>]
-
-    bind $W2 <2> [bind Text <2>]                ;# Enable dragging w/ <2>
-    bind $W2 <B2-Motion> [bind Text <B2-Motion>]
-    $W2 bind img <1> [bind $W2 <2>]
-    $W2 bind img <B1-Motion> [bind $W2 <B2-Motion>]
-    if {$::state(su)} {
-        catch {bind .zoom <Key-.> ::Zoom::Save&Close}
-    }
-    ::Zoom::DrawScale $T.left
-
-    destroy .sr_popup
-    menu .sr_popup -tearoff 0
-    .sr_popup add command -label "Add New Route Point" -underline 0 \
-        -command [list ::Zoom::RoutePoint add]
-    .sr_popup add command -label "Delete this Route Point" -underline 0 \
-        -command [list ::Zoom::RoutePoint delete]
-    .sr_popup add command -label "Split Road at Point" -underline 0 \
-        -command [list ::Zoom::RoutePoint "split"]
-    .sr_popup add separator
-    .sr_popup add command -label "Add Elevation" -underline 4 \
-        -command [list ::Zoom::RoutePoint elevation]
-    .sr_popup add command -label "Insert Waypoint" -underline 0 \
-        -command [list ::Zoom::RoutePoint insert]
-    .sr_popup add command -label "Create Arrow" -underline 0 \
-        -command [list ::Arrow::Dialog $::Zoom::W "" {0 0}]
-    .sr_popup add command -label "Google Maps" -underline 0 \
-        -command [list ::Zoom::RoutePoint google]
-    .sr_popup add separator
-    .sr_popup add command -label "Delete All Waypoints" -underline 7 \
-        -command [list ::Zoom::RoutePoint deleteall]
-    if {$::state(su)} {
-        .sr_popup add separator
-        set txt "Save [string totitle $::Zoom::ZMAP(what)] Data"
-        .sr_popup add command -label $txt -command ::Zoom::Save -underline 0
-    }
-    update
-}
-proc ::Zoom::Save&Close {} {
-    ::Zoom::USGSAllWaypoints
-    ::Zoom::Save
-    #::Zoom::Close
-    ::Save::SaveUserDataCmd 1
-    #puts "::Zoom::Save&Close: dist: $::Zoom::RINFO(dist) north: $::Zoom::RINFO(north) south: $::Zoom::RINFO(south)"
-}
-##+##########################################################################
-#
-# ::Zoom::MakeRoadFrame -- draws the frame w/ road title, distance & climbing
-#
-proc ::Zoom::MakeRoadFrame {parent} {
-    set PW $parent.road
-    ::my::labelframe $PW -text "Road Data"
-
-    set tw 8
-    set a [list -width $tw -justify center -state readonly]
-
-    ::my::label $PW.atitle -text "Data"
-    ::my::label $PW.etitle -text "Est."
-
-    ::my::entry $PW.title -textvariable ::Zoom::RINFO(title) -justify center
-    ::my::label $PW.ldist -text "Distance" -anchor w
-    ::my::entry $PW.edist -textvariable ::Zoom::RINFO(dist) -width $tw -justify center
-    eval ::my::entry $PW.gdist -textvariable ::Zoom::RINFO(guess,dist) $a
-    ::my::label $PW.lnorth -text "North climbing" -anchor w
-    ::my::entry $PW.enorth -textvariable ::Zoom::RINFO(north) -width $tw -justify center
-    eval ::my::entry $PW.gnorth -textvariable ::Zoom::RINFO(guess,north) $a
-    ::my::label $PW.lsouth -text "South climbing" -anchor w
-    ::my::entry $PW.esouth -textvariable ::Zoom::RINFO(south) -width $tw -justify center
-    eval ::my::entry $PW.gsouth -textvariable ::Zoom::RINFO(guess,south) $a
-
-    ::ttk::button $PW.save -text "Update" -command ::Zoom::Save
-    ::ttk::button $PW.usgs -image ::img::star -command ::Zoom::USGSAllWaypoints
-    bind $PW.usgs <Button-3> ::Zoom::Save&Close
-    ::Balloon::Create $PW.usgs static usgs "Query USGS for all waypoint elevation" ""
-
-    set ::Zoom::DS($PW,focus) $PW.edist
-
-    grid $PW.title - - -sticky ew -pady 5 -padx 5
-    grid $PW.ldist $PW.edist -sticky ew -padx 5 -row 2
-    grid $PW.lnorth $PW.enorth -sticky ew -padx 5
-    grid $PW.lsouth $PW.esouth -sticky ew -padx 5
-    if {1 || $::Zoom::ZMAP(guessable)} {
-        grid x $PW.atitle $PW.etitle -row 1
-        grid $PW.gdist  -row 2 -column 2 -sticky ew -padx {0 5}
-        grid $PW.gnorth -row 3 -column 2 -sticky ew -padx {0 5}
-        grid $PW.gsouth -row 4 -column 2 -sticky ew -padx {0 5}
-        grid $PW.usgs   -row 5 -column 2 -padx {0 5}
-    }
-    grid $PW.save - - -row 5 -pady 5
-    grid columnconfigure $PW 0 -weight 1
-}
-##+##########################################################################
-#
-# ::Zoom::MakeNodeFrame -- draws the frame w/ node data
-#
-proc ::Zoom::MakeNodeFrame {parent} {
-    set PW $parent.node
-    ::my::labelframe $PW -text "Node Data"
-
-    ::my::entry $PW.title -textvariable ::Zoom::RINFO(title) -justify center
-    ::my::label $PW.lele -text "Elevation" -anchor w
-    ::my::entry $PW.eele -textvariable ::Zoom::RINFO(ele) -width 20 -justify center
-    ::my::label $PW.luele -text "USGS Elevation" -anchor w
-    ::my::frame $PW.euele -borderwidth 2 -relief sunken
-    ::my::label $PW.euele.v -textvariable ::Zoom::RINFO(usgs) \
-        -background grey80 -anchor c \
-        -relief sunken -borderwidth 0 -justify center
-    ::ttk::button $PW.euele.star -image ::img::star -command ::Zoom::GoUSGS
-    pack $PW.euele.v -side left -fill both -expand 1
-    pack $PW.euele.star -side right
-
-    set txt "Query USGS for elevation"
-    ::Balloon::Create $PW.euele.star zoom usgs $txt $txt
-
-    # set fg [$PW.title cget -fg]
-    # foreach w [winfo child $PW] {
-    #   catch {$w config -disabledforeground $fg}
-    # }
-
-    ::ttk::button $PW.save -text Update -command ::Zoom::Save -state disabled
-    set ::Zoom::DS($PW,focus) $PW.eele
-
-    grid $PW.title - -sticky ew -pady 5 -padx 5
-    grid $PW.lele $PW.eele -sticky ew -padx 5
-    grid $PW.luele $PW.euele -sticky ew -padx 5
-    grid $PW.save - -pady 5
-    grid columnconfigure $PW 0 -weight 1
-}
-##+##########################################################################
-#
-# ::Zoom::MakePOIFrame -- draws the frame w/ POI data
-#
-proc ::Zoom::MakePOIFrame {parent} {
-    set PW $parent.poi
-    ::my::labelframe $PW -text "POI Data"
-
-    ::my::entry $PW.title -textvariable ::Zoom::RINFO(title) -justify center
-    ::my::entry $PW.desc -textvariable ::Zoom::RINFO(desc) -justify center
-
-    ::ttk::button $PW.save -text Update -state disabled -command ::Zoom::Save
-    set ::Zoom::DS($PW,focus) $PW.title
-
-    grid $PW.title - -sticky ew -pady 5 -padx 5
-    grid $PW.desc - -sticky ew -pady 5 -padx 5
-    grid $PW.save - -pady 5
-    grid columnconfigure $PW 0 -weight 1
-}
-##+##########################################################################
-#
-# ::Zoom::MakeGEOFrame -- draws the frame w/ GEO data
-#
-proc ::Zoom::MakeGEOFrame {parent} {
-    set PW $parent.geo
-    ::my::labelframe $PW -text "Geocaching Data"
-
-    ::my::entry $PW.title -textvariable ::Zoom::RINFO(title) -justify center
-
-    ::ttk::button $PW.save -text Update -state disabled -command ::Zoom::Save
-    set ::Zoom::DS($PW,focus) $PW.title
-
-    grid $PW.title - -sticky ew -pady 5 -padx 5
-    grid $PW.save - -pady 5
-    grid columnconfigure $PW 0 -weight 1
-}
-##+##########################################################################
-#
-# ::Zoom::MakeRouteFrame -- draws the frame w/ track info
-#
-proc ::Zoom::MakeRouteFrame {parent {what route}} {
-    set PW $parent.$what
-    ::my::labelframe $PW -text "[string totitle $what] Data"
-
-    ::my::entry $PW.title -textvariable ::Zoom::RINFO(title) -justify center
-    ::my::label $PW.ldist -text "Distance" -anchor w
-    ::my::entry $PW.edist -textvariable ::Zoom::RINFO(dist) -width 10 -justify center
-    ::my::label $PW.lclimb -text "Climbing" -anchor w
-    ::my::entry $PW.eclimb -textvariable ::Zoom::RINFO(climb) -width 10 -justify center
-    ::my::label $PW.ldesc -text "Descending" -anchor w
-    ::my::entry $PW.edesc -textvariable ::Zoom::RINFO(desc) -width 10 -justify center
-    set ::Zoom::DS($PW,focus) $PW.edist
-
-    ::ttk::button $PW.save -text "Update" -command ::Zoom::Save
-
-    grid $PW.title - -sticky ew -pady 5 -padx 5
-    grid $PW.ldist $PW.edist -sticky ew -padx 5
-    grid $PW.lclimb $PW.eclimb -sticky ew -padx 5
-    grid $PW.ldesc $PW.edesc -sticky ew -padx 5
-    #grid $PW.save - -pady 5
-    grid columnconfigure $PW 0 -weight 1
-}
-##+##########################################################################
-#
-# ::Zoom::MakeCoordsFrame -- draws the frame w/ user coordinates
-#
-proc ::Zoom::MakeCoordsFrame {parent} {
-    set PW $parent.coords
-    ::my::labelframe $PW -text "Coordinate Data"
-
-    ::my::entry $PW.title -textvariable ::Zoom::RINFO(title) -justify center
-    ::my::label $PW.llat -text "Latitude:"  -anchor w
-    ::my::entry $PW.lat -textvariable ::Zoom::RINFO(lat) -justify center
-    ::my::label $PW.llon -text "Longitude:" -anchor w
-    ::my::entry $PW.lon -textvariable ::Zoom::RINFO(lon) -justify center
-
-    ::ttk::button $PW.save -text Update -state disabled -command ::Zoom::Save
-    set ::Zoom::DS($PW,focus) $PW.title
-
-    grid $PW.title - -sticky ew -pady 5 -padx 5
-    grid $PW.llat $PW.lat -sticky ew -padx 5
-    grid $PW.llon $PW.lon -sticky ew -padx 5
-    grid columnconfigure $PW 0 -weight 1
-}
-##+##########################################################################
-#
-# ::Zoom::DisplayReadOnly -- updates display for readonly mode
-#
-proc ::Zoom::DisplayReadOnly {} {
-    set w ${::Zoom::T}.data
-    set how [expr {$::Zoom::ZMAP(readonly) ? "disabled" : "normal"}]
-    set how [expr {$::Zoom::ZMAP(readonly) ? "readonly" : "normal"}]
-    ::Zoom::DisplayReadOnly2 $w $how
-}
-proc ::Zoom::DisplayReadOnly2 {WW how} {
-    foreach w [winfo children $WW] {
-        if {[string match "*data.road.g*" $w]} continue
-        catch {$w config -state $how}
-        ::Zoom::DisplayReadOnly2 $w $how
-    }
-}
-##+##########################################################################
-#
-# ::Zoom::GoUSGS -- initiates querying USGS for elevation of a node
-#
-proc ::Zoom::GoUSGS {} {
-    variable RINFO
-
-    set utm [lindex $RINFO(pts) 0 6]
-    foreach {lat lon} [eval ::Data::utm2ll $utm] break
-    set latlon [concat [int2lat $lat] [int2lat $lon]]
-    set usgs [::USGS::Dialog $::Zoom::T $latlon]
-
-    # First convert to external units
-    set usgs [::Data::Convert $usgs climb]
-    if {! [string is double -strict $usgs]} {
-        set RINFO(usgs) $usgs
-        return
-    }
-
-    set RINFO(usgs) [::Data::Label $usgs climb 3]
-    if {$::Zoom::ZMAP(readonly)} return
-    if {[string is double -strict $RINFO(ele)]} return
-    set RINFO(ele) $usgs
-}
-##+##########################################################################
-#
-# ::Zoom::DrawScale -- creates our zoom buttons
-#
-proc ::Zoom::DrawScale {WW} {
-    variable STATIC
-
-    if {[lsearch [image names] ::img::plus] == -1} {
-        image create bitmap ::img::plus -foreground white -background darkblue \
-            -data {
-                #define plus_width 20
-                #define plus_height 20
-                static char plus_bits = {
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x3f, 0x00, 0xe0,
-                    0x7f, 0x00, 0x70, 0xe0, 0x00, 0x38, 0xc0, 0x00, 0x18, 0x86,
-                    0x01, 0x1c, 0x86, 0x03, 0x0c, 0x06, 0x03, 0xcc, 0x3f, 0x03,
-                    0xcc, 0x3f, 0x03, 0x0c, 0x06, 0x03, 0x1c, 0x86, 0x03, 0x18,
-                    0x86, 0x01, 0x38, 0xc0, 0x01, 0x70, 0xe0, 0x00, 0xe0, 0x7f,
-                    0x00, 0xc0, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-            } -maskdata {
-                #define mask_width 20
-                #define mask_height 20
-                static char mask_bits = {
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-            }
-        image create bitmap ::img::minus -foreground white \
-            -background darkblue -data {
-                #define minus_width 20
-                #define minus_height 20
-                static char minus_bits = {
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x3f, 0x00, 0xe0,
-                    0x7f, 0x00, 0x70, 0xe0, 0x00, 0x38, 0xc0, 0x00, 0x18, 0x80,
-                    0x01, 0x1c, 0x80, 0x03, 0x0c, 0x00, 0x03, 0xcc, 0x3f, 0x03,
-                    0xcc, 0x3f, 0x03, 0x0c, 0x00, 0x03, 0x1c, 0x80, 0x03, 0x18,
-                    0x80, 0x01, 0x38, 0xc0, 0x01, 0x70, 0xe0, 0x00, 0xe0, 0x7f,
-                    0x00, 0xc0, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-            } -maskdata {
-                #define mask_width 20
-                #define mask_height 20
-                static char mask_bits = {
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-            }
-        image create photo ::img::button -width 18 -height 6
-    }
-
-    ::tk::label $WW.zin -text "Zoom\nIn" -font {{MS Sans Serif} 6 bold} -bg beige \
-        -activebackground darkblue
-    grid $WW.zin -row 1 -sticky s
-    ::tk::button $WW.bp -image ::img::plus -bg darkblue -takefocus 0 \
-        -activebackground darkblue -command {::Zoom::NewMag -1}
-    ::Balloon::Create $WW.bp zoom plus "Zoom in by 2x" ""
-    grid  $WW.bp -pady 2 -row 2
-    for {set i -2} {$i < 10} {incr i} {
-        ::tk::radiobutton $WW.b$i \
-            -bg lightblue \
-            -image ::img::button \
-            -command [list ::Zoom::NewMag 0] \
-            -overrelief groove \
-            -variable ::Zoom::DS(mag) \
-            -value $i \
-            -activebackground darkblue \
-            -indicatoron 0 \
-            -takefocus 0 \
-            -selectcolor darkblue
-        set bmsg [lindex $STATIC(mags) [expr {$i+2}]]
-        ::Balloon::Create $WW.b$i zoom b$i "Zoom $bmsg" ""
-        grid $WW.b$i -pady 2 -row [expr {$i+3+2}]
-        if {$i <= 0} {
-            canvas $WW.b${i}_cover -bd 0 -highlightthickness 0 -bg beige
-            place $WW.b${i}_cover -in $WW.b$i -bordermode outside -x 0 -y 0 \
-                -relheight 1 -relwidth 1
-        }
-    }
-    ::tk::button $WW.bm -image ::img::minus -bg darkblue \
-        -activebackground darkblue -takefocus 0 -command {::Zoom::NewMag 1}
-    grid $WW.bm -pady 2
-    ::Balloon::Create $WW.bm zoom minus "Zoom out by 2x" ""
-    ::tk::label $WW.zout -text "Zoom\nOut" -font [$WW.zin cget -font] -bg beige \
-        -activebackground darkblue
-    grid $WW.zout -pady {0 20}
-
-    foreach w {topo aerial urban} \
-        msg {{View topo map} {View aerial photograph} \
-                 "View urban photograph\n(not available everywhere)"} {
-        ::tk::radiobutton $WW.$w -text [string totitle $w] \
-            -command ::Zoom::NewTheme \
-            -font [$WW.zin cget -font] \
-            -indicatoron 0 \
-            -relief raised \
-            -activeforeground white \
-            -activebackground darkblue \
-            -selectcolor darkblue \
-            -fg white \
-            -bg lightblue \
-            -takefocus 0 \
-            -variable ::Zoom::DS(theme) \
-            -value $w
-        ::Balloon::Create $WW.$w zoom $w $msg ""
-        grid $WW.$w -pady 2 -sticky ew -padx 5
-    }
-    ::Zoom::NewTheme
-}
-##+##########################################################################
-#
-# ::Zoom::SwapNodeRoad -- swaps the node info and the road info frames
-#
-proc ::Zoom::SwapNodeRoad {what} {
-    set parent ${::Zoom::T}.data
-    set w [pack slaves $parent]                 ;# Who is there now
-    set w2 "$parent.$what"                      ;# Who should be there
-    focus $::Zoom::DS($w2,focus)
-    catch {$::Zoom::DS($w2,focus) icursor end}
-
-    if {$w eq $w2} return
-    pack forget $w
-
-    if {[winfo exists $w2]} {
-        pack $w2 -side top -fill both -expand 1
-    }
-}
-##+##########################################################################
-#
-# ::Zoom::StartMapFetch -- puts all cells into appropriate queues
-#
-proc ::Zoom::StartMapFetch {} {
-    variable ZMAP
-    variable FETCH
-
-    array unset FETCH
-    set FETCH(q,visible) [set FETCH(q,core) [set FETCH(q,all) {}]]
-    set FETCH(aid) ""
-
-    foreach cell $ZMAP(cells) {
-        foreach {XX YY} $cell break
-        set FETCH(status,$XX,$YY) 0             ;# Mark as not fetched
-
-        if {[::Zoom::IsCellVisible $XX $YY]} {
-            lappend FETCH(q,visible) $cell
-        }
-        if {[lsearch $ZMAP(core) $cell] > -1} {
-            lappend FETCH(q,core) $cell
-        }
-        lappend FETCH(q,all) $cell
-    }
-}
-##+##########################################################################
-#
-# ::Zoom::Expose -- called when window scrolls, sets up after event to handle it
-#
-proc ::Zoom::Expose {} {
-    variable FETCH
-
-    after cancel $FETCH(aid)
-    set FETCH(aid) [after 200 ::Zoom::_Expose]
-}
-##+##########################################################################
-#
-# ::Zoom::_Expose -- called when window scrolls, updates visible queue
-#
-proc ::Zoom::_Expose {} {
-    variable FETCH
-    variable ZMAP
-
-    if {! $ZMAP(ready)} {                       ;# For BIG zooms, this gets
-        ::Zoom::Expose                          ;# called too early
-        return
-    }
-    set new {}
-    foreach cell $FETCH(q,all) {
-        foreach {XX YY} $cell break
-        if {$FETCH(status,$XX,$YY) != 0} continue ;# Already being fetched
-        if {! [::Zoom::IsCellVisible $XX $YY]} continue ;# Off screen
-        lappend new $cell
-    }
-    set FETCH(q,visible) $new
-    if {$new ne {}} {after idle ::Zoom::RunAllQueues}
-}
-##+##########################################################################
-#
-# ::Zoom::IsCellVisible -- return true if any part of a cell block is visible
-#
-proc ::Zoom::IsCellVisible {XX YY} {
-    variable SCREEN
-    foreach {cl ct cr cb} [::Zoom::CellBox $XX $YY] break
-
-    if {$ct >= $SCREEN(b) || $cb <= $SCREEN(t) \
-            || $cr <= $SCREEN(l) || $cl >= $SCREEN(r)} { return 0}
-    return 1
-}
-proc ::Zoom::DistanceFromVisible {XX YY} {
-    variable SCREEN
-    foreach {cl ct cr cb} [::Zoom::CellBox $XX $YY] break
-
-    set dist 0
-    if {$cl >= $SCREEN(r)} { set dist [expr {$dist + ($cr - $SCREEN(r))}] }
-    if {$cr <= $SCREEN(l)} { set dist [expr {$dist - ($cl - $SCREEN(l))}] }
-    if {$ct >= $SCREEN(b)} { set dist [expr {$dist + ($cb - $SCREEN(b))}] }
-    if {$cb <= $SCREEN(t)} { set dist [expr {$dist - ($ct - $SCREEN(t))}] }
-
-    return $dist
-}
-proc ::Zoom::bar {} {
-    foreach {t l b r} $::Zoom::ZMAP(bbox) break
-    for {set row $t} {$row >= $b} {incr row -1} {
-        set dr [expr {$t - $row}]
-        for {set col $l} {$col <= $r} {incr col} {
-            set dc [expr {$col - $l}]
-            set viz [::Zoom::IsCellVisible $col $row]
-            set dist [::Zoom::DistanceFromVisible $col $row]
-            set dist [format "%3d" $dist]
-            puts -nonewline "($dr,$dc) $viz,$dist  "
-        }
-        puts ""
-    }
-}
-##+##########################################################################
-#
-# ::Zoom::GetFilename -- returns name of where to store the map file
-#
-proc ::Zoom::GetFilename {XX YY} {
-    variable STATIC
-    variable ZMAP
-
-    set fname "${XX}_${YY}_$ZMAP(zone).jpg"
-    set dirname [file join $STATIC(cache) $ZMAP(theme) $ZMAP(mag) $XX]
-    if {! [file isdirectory $dirname]} {
-        file mkdir $dirname
-        if {! [file isdirectory $dirname]} {
-            WARN "Can't create directory '$dirname'"
-            set ZMAP(nofetch) 1
-            return ""
-        }
-    }
-    set fname [file join $dirname $fname]
-    return $fname
-}
-proc ::Zoom::GetIName {XX YY} {
-    set fname [::Zoom::GetFilename $XX $YY]
-    set iname "::zoom::[file rootname [file tail $fname]]"
-    return $iname
-}
-##+##########################################################################
-#
-# ::Zoom::GetURL -- return the url needed to fetch a particular map
-#
-proc ::Zoom::GetURL {XX YY} {
-    variable STATIC
-    variable ZMAP
-
-    set arg "T=$STATIC(rtheme,$ZMAP(theme))&S=$ZMAP(mag)&X=$XX&y=$YY"
-    append arg "&Z=$ZMAP(zone)"
-    set url "$STATIC(url2)?$arg"
-    return $url
-}
-##+##########################################################################
-#
-# ::Zoom::doneCmd -- callback routine that is called when a map page arrives
-#
-proc ::Zoom::doneCmd {token cookie} {
-    if {[::http::status $token] ne "ok"} return ;# Some kind of failure
-
-    foreach {sid fname XX YY} $cookie break
-    if {$sid != $::Zoom::ZMAP(sid)} return      ;# Wrong session
-
-    # Check for valid image: could be error message
-
-    # Save image off to a file
-    set fout [open $fname w]
-    fconfigure $fout -translation binary
-    puts -nonewline $fout [::http::data $token]
-    close $fout
-
-    after idle ::Zoom::PutImage $XX $YY [list $fname] web
-}
-##+##########################################################################
-#
-# ::Zoom::PutImage -- displays a image in a file at a given location
-#
-proc ::Zoom::PutImage {XX YY fname whence} {
-    variable W
-    variable ZMAP
-    variable FETCH
-    variable stats
-
-    if {! [winfo exists $W]} return
-    # perhaps skip rendering of non-visible, non-core cells
-
-    if {! [::Zoom::Ok2Render $XX $YY]} {        ;# DON'T DISPLAY IT!!!
-        set FETCH(status,$XX,$YY) 0             ;# Mark as unqueued
-        ::Zoom::Status $XX $YY discarded
-        return
-    }
-
-    set FETCH(status,$XX,$YY) 2                 ;# Mark as drawn
-    ::Zoom::Status $XX $YY $whence
-    incr stats(rendered)
-    lappend ZMAP(rendered) [list $XX $YY]
-
-    set iname [::Zoom::GetIName $XX $YY]
-    if {[lsearch [image names] $iname] == -1} {
-        set n [catch {image create photo $iname -file $fname}]
-        if {$n} {
-            set fname2 ${fname}.bad
-            file rename -force $fname $fname2
-            INFO "Bad image file $fname2"
-            set FETCH(status,$XX,$YY) 0         ;# Mark as unqueued
-            ::Zoom::Status $XX $YY discarded
-            return
-        }
-    }
-    foreach {x y} [::Zoom::Chunk2canvas $XX $YY] break
-    $W create image $x $y -image $iname -tag [list img img_$XX,$YY] -anchor sw
-    $W raise road
-    $W raise node
-    $W raise geo
-    $W raise rtept
-    $W raise trackpoint
-    if {$ZMAP(mag) > 13} { $W lower rtept }
-    $W raise milepost
-    $W raise arrow
-    $W raise BOX ; $W lower dash
-    update idletasks
-}
-proc ::Zoom::MakeGrayscale {img} {
-    set w [image width $img]
-    set h [image height $img]
-    image create photo ::zoom::tmp -width $w -height $h
-    ::zoom::tmp config -data [$img data -format jpeg -grayscale]
-    $img blank
-    $img copy ::zoom::tmp
-    image delete ::zoom::tmp
-}
-##+##########################################################################
-#
-# ::Zoom::Ok2Render -- determines if it is okay to render this cell.
-# If we're over the max allowed, then skip if not visible or else
-# kick out some other non-visible cell
-#
-proc ::Zoom::Ok2Render {XX YY} {
-    variable W
-    variable ZMAP
-    variable STATIC
-    variable FETCH
-
-    set n [llength $ZMAP(rendered)]
-    #if {$n < $STATIC(maxRendered)} { puts "$XX,$YY: enough room $n" }
-    if {$n < $STATIC(maxRendered)} { return 1 } ;# Enough room
-    #if {! [::Zoom::IsCellVisible $XX $YY]} { puts "$XX,$YY: offscreen" }
-    if {! [::Zoom::IsCellVisible $XX $YY]} { return 0 } ;# Offscreen, ignore
-
-    set idx [::Zoom::FindFurthestAway]
-    foreach {xx yy} [lindex $ZMAP(rendered) $idx] break
-    set ZMAP(rendered) [lreplace $ZMAP(rendered) $idx $idx]
-    set iname [::Zoom::GetIName $xx $yy]
-    $W delete img_$xx,$yy
-    image delete $iname
-    set FETCH(status,$xx,$yy) 0                 ;# Mark as unqueued
-    ::Zoom::Status $xx $yy discarded
-
-    #puts "$XX,$YY: kicking out $xx,$yy => $::Zoom::FETCH(status,$xx,$yy)"
-
-    return 1
-}
-##+##########################################################################
-#
-# ::Zoom::FindFurthestAway -- returns rendered cell furthest
-# away from the visible area. Uses cartesian distance from
-# visible area; better(?) would be linear from core.
-#
-proc ::Zoom::FindFurthestAway {} {
-    variable ZMAP
-
-    set worst 0
-    set dist 0
-    set idx -1
-    foreach cell $ZMAP(rendered) {
-        incr idx
-        set d [eval ::Zoom::DistanceFromVisible $cell]
-        if {$d > $dist} {
-            set dist $d
-            set worst $idx
-        }
-    }
-    return $worst
-}
-##+##########################################################################
-#
-# Status -- displays status of a cell and its fetching state
-# PGS how: queued pending cancel timeout failure done
-# zoom how: cache web
-#
-proc ::Zoom::Status {XX YY how} {
-    variable W
-    variable W2
-    variable stats
-    variable COLORS
-
-    if {! [winfo exists $W]} return
-    $W itemconfig cell$XX,$YY -fill $COLORS($how)
-    $W2 itemconfig cell$XX,$YY -fill $COLORS($how)
-
-    if {$how eq "queued"} {
-        incr stats(queued)
-    } elseif {$how eq "pending"} {
-        incr stats(queued) -1
-        incr stats(loading)
-    } elseif {$how eq "done"} {
-        incr stats(loading) -1
-        incr stats(retrieved)
-    } elseif {$how eq "failure" || $how eq "cancel"} {
-        incr stats(loading) -1
-    }
-}
-##+##########################################################################
-#
-# ::Zoom::statusCmd -- status callback for Parallel Get URL package
-#
-proc ::Zoom::statusCmd {id how cookie} {
-    foreach {sid . XX YY} $cookie break
-    if {$sid != $::Zoom::ZMAP(sid)} return
-    ::Zoom::Status $XX $YY $how
-}
-##+##########################################################################
-#
-# ::Zoom::GetOneMap -- does the work to make one map appear
-#
-proc ::Zoom::GetOneMap {XX YY} {
-    variable ZMAP
-    variable FETCH
-
-    set fname [::Zoom::GetFilename $XX $YY]
-    if {$fname eq ""} return
-
-    if {! $ZMAP(nocache) && [file exists $fname]} { ;# Is it in the cache?
-        ::Zoom::PutImage $XX $YY $fname cache
-    } else {
-        if {$ZMAP(nofetch)} return
-        set url [::Zoom::GetURL $XX $YY]
-        set cookie [list $ZMAP(sid) $fname $XX $YY]
-        ::PGU::Add $url $cookie ::Zoom::doneCmd ::Zoom::statusCmd
-        set FETCH(status,$XX,$YY) 1
-    }
-}
-##+##########################################################################
-#
-# ::Zoom::RunOneQueue -- gets all the maps in a given queue
-#
-proc ::Zoom::RunOneQueue {which max} {
-    variable FETCH
-
-    set cnt 0
-    foreach cell $FETCH(q,$which) {
-        if {$cnt >= $max} break
-        foreach {XX YY} $cell break
-        if {$FETCH(status,$XX,$YY) != 0} continue
-        ::Zoom::GetOneMap $XX $YY
-        incr cnt
-    }
-    set FETCH(q,$which) [lrange $FETCH(q,$which) $cnt end]
-    return $cnt
-}
-##+##########################################################################
-#
-# ::Zoom::RunAllQueues -- empties the visible and/or core queues
-#
-proc ::Zoom::RunAllQueues {} {
-    variable FETCH
-    variable STATIC
-
-    set qlen [lindex [::PGU::Statistics] 0]
-    set n [expr {$STATIC(maxFetch) - $qlen}]
-
-    set cnt [::Zoom::RunOneQueue visible $n]
-    incr cnt [::Zoom::RunOneQueue core [expr {$n - $cnt}]]
-    after idle ::PGU::Launch
-    return $cnt
-}
-##+##########################################################################
-#
-# ::Zoom::canvas2utm -- converts from canvas into utm coordinates
-#
-proc ::Zoom::canvas2utm {x y} {
-    variable ZMAP
-
-    set mult [expr {int(100 * pow(2,$ZMAP(mag)-9))}]
-
-    set eX [expr {$x / 200.0 + $ZMAP(o,x)}]
-    set eY [expr {$ZMAP(o,y) - $y / 200.0}]
-    set north [expr {$eY * $mult}]
-    set east [expr {$eX * $mult}]
-    set zone $ZMAP(zone)
-
-    return [list $north $east $zone]
-}
-##+##########################################################################
-#
-# ::Zoom::DoPopupMenu -- puts up the right-click popup menu
-#
-proc ::Zoom::DoPopupMenu {x y what {who ""}} {
-    variable W
-    variable DS
-    variable ZMAP
-
-    set DS(popup,cxy) [list [$W canvasx $x] [$W canvasy $y]]
-    set DS(popup,what) $what
-    set DS(popup,who) $who
-
-    # Short circuit shortcuts
-    if {$what eq "add" || $what eq "delete"} {
-        ::Zoom::RoutePoint $what
-        return
-    }
-
-    # 0 = new route point
-    # 1 = delete
-    # 2 = split
-    # 3
-    # 4 = elevation
-    # 5 = insert waypoint
-    # 6 = arrow
-    # 7 = google
-    # 8
-    # 9 = delete all
-    # 10
-    # 11 = save
-
-    set isRtept [expr {$what eq "rtept"}]
-    set notRtept [expr {$what ne "rtept"}]
-    set isMap [expr {$what eq "map"}]
-    set ss(0) disabled ; set ss(1) normal
-
-    .sr_popup entryconfig 0 -state $ss($notRtept)
-    .sr_popup entryconfig 1 -state $ss($isRtept)
-    .sr_popup entryconfig 2 -state $ss($notRtept)
-    .sr_popup entryconfig 4 -state $ss($isRtept)
-    .sr_popup entryconfig 5 -state $ss($notRtept)
-    if {$what eq "arrow"} {
-        .sr_popup entryconfig 6 -label "Update Arrow" -state normal \
-            -command [list ::Arrow::Dialog $Zoom::W $who]
-    } else {
-        .sr_popup entryconfig 6 -label "Create Arrow" -state $ss($isMap) \
-            -command [list ::Arrow::Dialog $::Zoom::W "" $DS(popup,cxy)]
-    }
-    .sr_popup entryconfig 7 -state normal
-    .sr_popup entryconfig 9 -state normal
-
-    if {$ZMAP(readonly)} {
-        .sr_popup entryconfig 0 -state disabled
-        .sr_popup entryconfig 1 -state disabled
-        .sr_popup entryconfig 4 -state disabled
-        .sr_popup entryconfig 5 -state disabled
-        .sr_popup entryconfig 9 -state disabled
-    }
-    tk_popup .sr_popup [winfo pointerx $W] [winfo pointery $W] \
-        [expr {$what eq "road" ? 0 : ""}]
-}
-proc ::Zoom::old___DoPopupMenu {x y what {who ""}} {
-    variable W
-    variable DS
-
-    set DS(popup,cxy) [list [$W canvasx $x] [$W canvasy $y]]
-    set DS(popup,what) $what
-    set DS(popup,who) $who
-    if {$what eq "go"} {
-        ::Zoom::RoutePoint add
-        return
-    }
-    if {$what eq "delete"} {
-        ::Zoom::RoutePoint delete
-        return
-    }
-
-    set ss(0) disabled ; set ss(1) normal
-    if {$::Zoom::ZMAP(readonly)} { set ss(1) $ss(0)}
-    .sr_popup entryconfig 0 -state $ss([string equal "road"  $what])
-    .sr_popup entryconfig 1 -state $ss([string equal "rtept" $what])
-    .sr_popup entryconfig 3 -state $ss([string equal "rtept" $what])
-
-    tk_popup .sr_popup [winfo pointerx $W] [winfo pointery $W] \
-        [expr {$what eq "road" ? 0 : ""}]
-}
-##+##########################################################################
-#
-# RoutePoint -- handles adding or deleting route points
-#
-proc ::Zoom::RoutePoint {what} {
-    variable RINFO
-    variable DS
-
-    if {$what eq "delete"} {
-        set RINFO(pts) [lreplace $RINFO(pts) $DS(popup,who) $DS(popup,who)]
-        ::Zoom::IsModified 1
-        ::Zoom::DrawPoints
-        ::Zoom::GuessDistance
-        ::Zoom::GuessClimbing
-    } elseif {$what eq "add" || $what eq "insert"} {
-        foreach {idx seg} [::Zoom::FindSplit] break
-        if {$what eq "insert"} {
-            set xy [eval ::Data::NearestPointOnLine $DS(popup,cxy) $seg]
-            set utm [eval ::Zoom::canvas2utm $xy]
-        } else {
-            set utm [eval ::Zoom::canvas2utm $DS(popup,cxy)]
-        }
-
-        set pt [list {} ? 0 0 routepoint $RINFO(who) $utm added]
-        set RINFO(pts) [linsert $RINFO(pts) $idx $pt]
-        ::Zoom::IsModified 1
-        ::Zoom::DrawPoints
-        ::Zoom::GuessDistance
-        ::Zoom::GuessClimbing
-    } elseif {$what eq "elevation"} {
-        ::Zoom::UpdateRoutePoint $DS(popup,who)
-        ::Zoom::GuessClimbing
-    } elseif {$what eq "split"} {
-        #::Zoom::Close
-        set utm [eval ::Zoom::canvas2utm $DS(popup,cxy)]
-        set ::state(popup,what) "zoom"
-        set ::state(popup,who) $RINFO(who)
-        set ::state(popup,latlon) [eval ::Data::utm2ll $utm]
-        ::Edit::CreateSplit
-    } elseif {$what eq "google"} {
-        set utm [eval ::Zoom::canvas2utm $DS(popup,cxy)]
-        set ll [eval ::Data::utm2ll $utm]
-        ::Zoom::Google zoompoint $ll
-    } elseif {$what eq "deleteall"} {
-        set RINFO(pts) [list [lindex $RINFO(pts) 0] [lindex $RINFO(pts) end]]
-        ::Zoom::IsModified 1
-        ::Zoom::DrawPoints
-        ::Zoom::GuessDistance
-        ::Zoom::GuessClimbing
-    }
-}
-##+##########################################################################
-#
-# ::Zoom::IsModified -- called whenever modified status changes
-#
-proc ::Zoom::IsModified {onoff args} {
-    set s [expr {$onoff ? "normal" : "disabled"}]
-
-    foreach w [winfo child ${::Zoom::T}.data] {
-        $w.save config -state $s
-        if {[winfo exists $w.usgs]} {
-            $w.usgs config -state $s
-        }
-    }
-    .sr_popup entryconfig 9 -state $s
-    ${::Zoom::T}.buttons.save config -state $s
-}
-##+##########################################################################
-#
-# ::Zoom::FindSplit -- finds which leg the split point should be made on
-#
-proc ::Zoom::FindSplit {} {
-    variable W
-    variable DS
-
-    foreach {cx cy} $DS(popup,cxy) break
-
-    set xy [$W coords road]
-    set best 0
-    set dist 999999
-    set seg {}
-    for {set i 0} {$i+2 < [llength $xy]} {incr i 2} {
-        foreach {x0 y0 x1 y1} [lrange $xy $i [expr {$i+3}]] break
-        set d [::Data::DistanceToLine $cx $cy $x0 $y0 $x1 $y1]
-        if {$d < $dist} {
-            set dist $d
-            set best $i
-            set seg [list $x0 $y0 $x1 $y1]
-        }
-    }
-    set best [expr {($best / 2) + 1}]
-    return [list $best $seg]
-}
-##+##########################################################################
-#
-# ::Zoom::UpdateRoutePoint -- dialog to add elevation to a route point
-#
-proc ::Zoom::UpdateRoutePoint {idx} {
-    variable RINFO
-    global nnode
-
-    unset -nocomplain nnode
-    set lat [int2lat [lindex $RINFO(pts) $idx 2]]
-    set lon [int2lat [lindex $RINFO(pts) $idx 3]]
-    set nnode(latlon) [concat $lat $lon]
-    foreach {lat lon} [::Display::PrettyLat $lat $lon] break
-
-    set txt "Add Route Point Elevation"
-    set nnode(wtitle) "$::state(progname) $txt"
-    set nnode(title)  "$txt\nLatitude $lat\nLongitude $lon"
-    set nnode(l0) Elevation
-    set nnode(e0) [lindex $RINFO(pts) $idx 1]
-    set nnode(t0) 1
-    set nnode(l1) "USGS Elevation"
-    set nnode(e1) "?"
-    set nnode(t1) 8
-    ::Edit::NewDlg "Route Point" 2 $idx
-    # Calls Edit::AddRoutePoint when done
-}
-##+##########################################################################
-#
-# ::Edit::AddRoutePoint -- called from ::Zoom::UpdateRoutePoint's dialog
-#
-proc ::Edit::AddRoutePoint {idx} {
-    global nnode
-
-    set elev "?"
-    if {[string is double -strict $nnode(e0)]} {
-        set elev $nnode(e0)
-    }
-    lset ::Zoom::RINFO(pts) $idx 1 $elev
-    ::Zoom::IsModified 1
-    destroy .nnode
-    ::Zoom::DrawPoints
-    ::Zoom::GuessClimbing
-}
-##+##########################################################################
-#
-# ::Zoom::SortCells -- sorts list of cells by closeness to given cell
-#
-proc ::Zoom::SortCells {ox oy cells} {
-    set all {}
-    foreach cell $cells {
-        foreach {x y} $cell break
-        set dist [expr {($x - $ox)*($x - $ox) + ($y - $oy) * ($y - $oy)}]
-        lappend all [list $cell $dist]
-    }
-    set all [lsort -real -index 1 $all]
-    set cells {}
-    foreach cell $all { lappend cells [lindex $cell 0]}
-    return $cells
-}
-##+##########################################################################
-#
-# Save -- saves the current road into <zone dir>/user.nodes
-#
-proc ::Zoom::Save {} {
-    variable RINFO
-    variable DS
-    global state roads nnode poi
-
-    ::Data::MarkModified $RINFO(what) $RINFO(who)
-    if {$RINFO(what) eq "road"} {
-        set rid $RINFO(who)
-        set ll {}
-        set elevs {}
-        foreach pt [lrange $RINFO(pts) 1 end-1] {
-            foreach {name elev lat lon type who utm} $pt break
-            if {$lat == 0} {                    ;# It got moved
-                foreach {lat lon} [eval ::Data::utm2ll $utm] break
-            }
-            eval lappend ll [int2lat $lat] [int2lat $lon]
-            lappend elevs $elev
-        }
-        if {[llength $ll] == 1} {set ll {}}     ;# No xy data
-
-        # Store north, dist & south but get from our guess if bad
-        foreach what {north dist south} idx {2 3 4} {
-            if {[::BadMath::IsBad $RINFO($what)]} {
-                set RINFO($what) "$RINFO(guess,$what)+?"
-            }
-            lset roads($rid) $idx $RINFO($what)
-        }
-        lset roads($rid) 6 $RINFO(title)        ;# Road name
-        lset roads($rid) 8 $ll                  ;# XY data
-        lset roads($rid) 9 $elevs               ;# Z data
-        lset roads($rid) 11 zoom                ;# Data source
-        ::Data::ReProcessOneRoad $rid
-        ::Zoom::IsModified 0
-        ::Route::StatRoute 1
-        return
-    }
-
-    if {$RINFO(what) eq "node"} {
-        set nnode(e0) $RINFO(title)             ;# Put into Edit's global array
-        set nnode(e1) $RINFO(ele)
-        set nnode(e2) $RINFO(usgs)
-        set utm [lindex $RINFO(pts) 0 6]
-        foreach {lat lon} [eval ::Data::utm2ll $utm] break
-        set nnode(latlon) [list $lat 0 0 $lon 0 0]
-        ::Edit::AddNode $RINFO(who)
-        ::Zoom::IsModified 0
-        return
-    }
-
-    if {$RINFO(what) eq "poi"} {
-        set utm [lindex $RINFO(pts) 0 6]
-        foreach {lat lon} [eval ::Data::utm2ll $utm] break
-        lset poi($RINFO(who)) 1 $RINFO(title)
-        lset poi($RINFO(who)) 2 $lat
-        lset poi($RINFO(who)) 3 $lon
-        lset poi($RINFO(who)) 6 [::Display::pos2canvas root $lat $lon]
-        ::Display::DrawPOI $RINFO(who)
-        ::Zoom::IsModified 0
-        return
-    }
-    if {$RINFO(what) eq "geo"} {
-        set utm [lindex $RINFO(pts) 0 6]
-        foreach {lat lon} [eval ::Data::utm2ll $utm] break
-        lset ::GPS::wpts($RINFO(who)) 0 $lat
-        lset ::GPS::wpts($RINFO(who)) 1 $lon
-        lset ::GPS::wpts($RINFO(who)) 3 $RINFO(title)
-        lset ::GPS::wpts($RINFO(who)) 6 [::Display::pos2canvas root $lat $lon]
-        ::GPS::DrawWpts g 0
-        ::Zoom::IsModified 0
-    }
-}
-##+##########################################################################
-#
-# ::Zoom::Google -- brings up google maps at a specific lat/lon
-# NB. google doesn't supply any marker on the map yet
-#
-proc ::Zoom::Google {what {who ?}} {
-    variable ZMAP
-    variable google
-
-    if {$what eq "zoom" && $ZMAP(what) eq "road"} { ;# Called from w/i zoom
-        set what $::Zoom::ZMAP(what)
-        set who $::Zoom::ZMAP(who)
-    } elseif {$what eq "popup"} {
-        set what $::state(popup,what)
-        set who $::state(popup,who)
-    }
-    set what [string tolower $what]
-    set last $google(last)
-    set google(last) [list $what $who]
-
-    set to ""
-    set mid ""
-    if {$what eq "node"} {
-        foreach {. . lat lon} $::nodes($who) break
-        set from "$lat+-$lon"
-    } elseif {$what eq "zoom"} {
-        set utm [lindex $::Zoom::RINFO(pts) 0 6]
-        foreach {lat lon} [eval ::Data::utm2ll $utm] break
-        set from "$lat+-$lon"
-    } elseif {$what eq "poi"} {
-        foreach {. . lat lon} $::poi($who) break
-        set from "$lat+-$lon"
-    } elseif {$what eq "geo"} {
-        foreach {lat lon} $::GPS::wpts($who) break
-        set from "$lat+-$lon"
-    } elseif {$what eq "coords"} {
-        foreach {lat lon} [::Coords::Where] break
-        set lat [eval lat2int $lat]
-        set lon [eval lat2int $lon]
-        set from "$lat+-$lon"
-    } elseif {$what eq "map" || $what eq "embellishment"} {
-        foreach {x y} $::state(popup) break
-        foreach {. . . . lat lon} [::Display::canvas2pos $x $y] break
-        set from "$lat+-$lon"
-    } elseif {$what eq "zoompoint"} {
-        foreach {lat lon} $who break
-        set from "$lat+-$lon"
-    } elseif {$what eq "road"} {
-        foreach {nid1 nid2} $::roads($who) break
-        foreach {. . lat lon} $::nodes($nid1) break
-        set from "$lat+-$lon"
-        foreach {. . lat lon} $::nodes($nid2) break
-        set to "$lat+-$lon"
-
-        # If repeating google map road, then put in a midpoint
-        if {$last eq [list $what $who]} {
-            set xy [lindex $::roads($who) 8]
-            set len [expr {[llength $xy] / 6}]
-            if {$len > 0} {
-                set n [expr {($len/2) * 6}]
-                set lat3 [lrange $xy $n [expr {$n+2}]]
-                set lon3 [lrange $xy [expr {$n+3}] [expr {$n+5}]]
-                set lat [eval lat2int $lat3]
-                set lon [eval lat2int $lon3]
-                set mid "$lat+-$lon"
-            }
-        }
-    } elseif {$what eq "wpt"} {
-        foreach {lat lon} $::GPS::wpts($who) break
-        set from "$lat+-$lon"
-    } else {
-        puts "ERROR: unknown item for zoom google: '$what' '$who'"
-        return
-    }
-
-    if {$to eq ""} {
-        set url "http://maps.google.com/maps?q=$from"
-    } elseif {$mid eq ""} {
-        set url "http://maps.google.com/maps?saddr=$from&daddr=$to"
-    } else {
-        set url "http://maps.google.com/maps?saddr=$from&daddr=$mid+to:$to"
-    }
-    WebPage $url
-    return $url
-}
-##+##########################################################################
-#
-# ::Zoom::USGSAllWaypoints -- gets the USGS elevation for all waypoints
-#
-proc ::Zoom::USGSAllWaypoints {} {
-    variable W
-    variable RINFO
-
-    set who {}
-    for {set i 0} {$i < [llength $RINFO(pts)]} {incr i} {
-        set elev [lindex $RINFO(pts) $i 1]
-        if {[string is double -strict $elev] && $elev > 0} continue
-        lappend who $i
-    }
-    if {$who eq {}} return
-
-    # Post dialog box for all queries
-    set dlg [::USGS::_MakeWaitDialog [winfo toplevel $W]]
-    after idle [list ::Zoom::_USGSAllWaypoints2 $dlg $who]
-    DoGrab $dlg $dlg
-    ::Zoom::GuessClimbing
-}
-##+##########################################################################
-#
-# ::Zoom::_USGSAllWaypoints2 -- helper for ::Zoom::USGSAllWaypoints
-#
-proc ::Zoom::_USGSAllWaypoints2 {dlg who} {
-    variable RINFO
-
-    set cnt 0
-    foreach idx $who {
-        incr cnt
-        if {! [winfo exists $dlg]} break
-
-        foreach {. . lat lon . . utm} [lindex $RINFO(pts) $idx] break
-        if {$lat == 0} {                        ;# In utm
-            foreach {lat lon} [eval ::Data::utm2ll $utm] break
-            lset RINFO(pts) $idx 2 $lat
-            lset RINFO(pts) $idx 3 $lon
-        }
-        #set lat [lindex $RINFO(pts) $idx 2]
-        #set lon [lindex $RINFO(pts) $idx 3]
-        set latlon [concat [int2lat $lat] [int2lat $lon]]
-        set ::USGS::S(msg) "Querying waypoint $cnt of [llength $who]"
-
-        set usgs [::USGS::Query "" $latlon]
-        if {[string is double -strict $usgs]} {
-            lset RINFO(pts) $idx 1 $usgs
-        }
-        update
-    }
-    ::Zoom::IsModified 1
-    ::Zoom::DrawPoints
-    destroy $dlg
-}
-
-proc ::Zoom::Elevs {} {
-    package require Plotchart
-    variable RINFO
-
-    unset -nocomplain X
-    unset -nocomplain Y
-    set X {}
-    set Y {}
-    for {set i 0} {$i < [llength $RINFO(pts)]} {incr i} {
-        set elev [lindex $RINFO(pts) $i 1]
-        if {! [string is double -strict $elev]} continue
-        lappend X $i
-        lappend Y $elev
-    }
-    set y_sort [lsort -real $Y]
-    set ys [::Plotchart::determineScale [lindex $y_sort 0] [lindex $y_sort end]]
-    set xs [::Plotchart::determineScale [lindex $X 0] [lindex $X end]]
-    lset xs 2 1
-
-    set W .elevs
-    if {! [winfo exists $W]} {
-        destroy W
-        toplevel $W
-        wm transient $W .
-        ::ttk::button $W.replot -text "Replot" -command ::Zoom::Elevs
-        ::ttk::button $W.ok -text "Dismiss" -command [list destroy $W]
-        set w [expr {.8 * [winfo screenwidth .]}]
-        canvas $W.c -width $w -bd 0 -highlightthickness 0
-        pack $W.c -expand 1 -fill both -side top
-        pack $W.replot $W.ok -side left -expand 1 -pady 10
-    } else {
-        raise $W
-        $W.c config -width [winfo width $W.c] -height [winfo height $W.c]
-    }
-    $W.c delete all
-    set s [::Plotchart::createXYPlot $W.c $xs $ys]
-    foreach x $X y $Y {
-        $s plot series1 $x $y
-    }
-    $W.c itemconfig data -tag series1 -width 2
-    set xy0 [::Plotchart::coordsToPixel $W.c [lindex $X 0] [lindex $Y 0]]
-    set xy1 [::Plotchart::coordsToPixel $W.c [lindex $X end] [lindex $Y end]]
-
-    $W.c create line [concat $xy0 $xy1] -tag a -fill green -width 2
-}
-## EON ZOOM
+source zoom.tcl
+# _ZOOM_ ## BON ZOOM
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::Go -- zooms given road id
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::Go {what who} {
+# _ZOOM_     variable ZMAP
+# _ZOOM_
+# _ZOOM_     ::Zoom::Init
+# _ZOOM_     if {! $::state(zoom,canDo)} return
+# _ZOOM_
+# _ZOOM_     set what [string tolower $what]
+# _ZOOM_     if {$what eq "popup"} {
+# _ZOOM_         set what $::state(popup,what)
+# _ZOOM_         set who $::state(popup,who)
+# _ZOOM_         if {$what eq "map"} {
+# _ZOOM_             set what "coords"
+# _ZOOM_             set who "map"
+# _ZOOM_         }
+# _ZOOM_     }
+# _ZOOM_     set n [lsearch -exact {road node poi geo route track coords} $what]
+# _ZOOM_     if {$n == -1} return
+# _ZOOM_
+# _ZOOM_     set ZMAP(what) $what
+# _ZOOM_     set ZMAP(who) $who
+# _ZOOM_     set ZMAP(readonly) [expr {!$::state(su) && [string range $who 0 0] ne "X"}]
+# _ZOOM_     set ZMAP(guessable) [expr {$::state(su) || ($what eq "road" \
+# _ZOOM_                                     && [string match "X*" $who])}]
+# _ZOOM_
+# _ZOOM_     ::Zoom::DoDisplay
+# _ZOOM_     ::Zoom::GetDetails $what $who
+# _ZOOM_     set ::Zoom::DS(title) $::Zoom::RINFO(title)
+# _ZOOM_     ::Zoom::MakeMap
+# _ZOOM_     ::Data::UniqueTrace ::Zoom::RINFO {::Zoom::IsModified 1}
+# _ZOOM_     ::Atlas::Reparent
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::Init -- loads everything needed by the zoom feature
+# _ZOOM_ #   http://terraserver-usa.com/about.aspx?n=AboutLinktoHtml
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::Init {} {
+# _ZOOM_     variable STATIC
+# _ZOOM_     global state
+# _ZOOM_
+# _ZOOM_     set STATIC(maxRendered) $state(zoom,maxRendered)
+# _ZOOM_     if {[info exists state(zoom,canDo)] && ! $state(zoom,canDo)} return
+# _ZOOM_
+# _ZOOM_     set state(zoom,canDo) 0                     ;# Assume we can't do it
+# _ZOOM_     if {! [::Data::CanDo internet]} {
+# _ZOOM_         return [WARN "This feature requires the http extension"]
+# _ZOOM_     }
+# _ZOOM_     if {! $state(can,jpeg)} {
+# _ZOOM_         return [WARN "This feature requires the Img extension"]
+# _ZOOM_     }
+# _ZOOM_     if {! [::Data::CanDo pgu]} {
+# _ZOOM_         return [WARN "This feature requires KLIMB's pgu extension"]
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     set state(zoom,canDo) 1
+# _ZOOM_     set STATIC(url2) $STATIC(url)
+# _ZOOM_     ::Zoom::FindCache
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::FindCache -- returns location of our cache directory
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::FindCache {} {
+# _ZOOM_     #set ::Zoom::STATIC(cache) [file join $::state(wdir) zoom]
+# _ZOOM_     set ::Zoom::STATIC(cache) [file join $::state(zdir) zoom]
+# _ZOOM_     return $::Zoom::STATIC(cache)
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::MakeMap -- sets us up for a new map to be displayed
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::MakeMap {} {
+# _ZOOM_     variable DS
+# _ZOOM_     variable ZMAP
+# _ZOOM_     variable stats
+# _ZOOM_
+# _ZOOM_     #::PGU::Cancel -all
+# _ZOOM_     set ZMAP(ready) 0
+# _ZOOM_     set ZMAP(mag) [expr {$DS(mag) + 10}]
+# _ZOOM_     set ZMAP(theme) $DS(theme)
+# _ZOOM_     set ZMAP(rendered) {}                       ;# List of all rendered cells
+# _ZOOM_     incr ZMAP(sid)                              ;# Session id
+# _ZOOM_     ::Zoom::Layout
+# _ZOOM_     ::Zoom::DrawGrid
+# _ZOOM_     ::Zoom::DrawPoints
+# _ZOOM_     if {$ZMAP(what) eq "route"} {
+# _ZOOM_         ::MilePost::Go $::Zoom::W
+# _ZOOM_         ::Arrow::Go $::Zoom::W
+# _ZOOM_     }
+# _ZOOM_     if {$::state(atlas)} {
+# _ZOOM_         ::Atlas::Begin
+# _ZOOM_     }
+# _ZOOM_     update
+# _ZOOM_
+# _ZOOM_     ::Zoom::StartMapFetch
+# _ZOOM_     set ZMAP(ready) 1
+# _ZOOM_     set stats(rendered) 0
+# _ZOOM_     #::Zoom::RunAllQueues ;# this happens via Expose from scrollbar
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::Canvas2Small -- converts W coordinates to W2 coordinates
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::Canvas2Small {args} {
+# _ZOOM_     variable STATIC
+# _ZOOM_
+# _ZOOM_     set xy {}
+# _ZOOM_     foreach x $args {
+# _ZOOM_         lappend xy [expr {$x / $STATIC(small)}]
+# _ZOOM_     }
+# _ZOOM_     return $xy
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # Clear -- clears the map and deletes all map images
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::Clear {} {
+# _ZOOM_     variable W
+# _ZOOM_     variable W2
+# _ZOOM_     variable ZMAP
+# _ZOOM_
+# _ZOOM_     if {[info exists ::nnode(l0)] && $::nnode(l0) eq "Elevation"} {
+# _ZOOM_         destroy .nnode
+# _ZOOM_     }
+# _ZOOM_     if {[winfo exist $W]} {
+# _ZOOM_         $W delete all
+# _ZOOM_         $W2 delete all
+# _ZOOM_
+# _ZOOM_         $W config -scrollregion {0 0 99999 99999}
+# _ZOOM_         $W xview moveto 0
+# _ZOOM_         $W yview moveto 0
+# _ZOOM_         update
+# _ZOOM_     }
+# _ZOOM_     foreach img [image names] {
+# _ZOOM_         if {[string match "::zoom::*" $img]} {
+# _ZOOM_             image delete $img
+# _ZOOM_         }
+# _ZOOM_     }
+# _ZOOM_     set ZMAP(rendered) {}
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::MyScroller -- our scroll procedure that also gets maps
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::MyScroller {xy first last} {
+# _ZOOM_     ::Zoom::GetScreenRect
+# _ZOOM_     ${::Zoom::T}.sb_$xy set $first $last
+# _ZOOM_     ::Zoom::OverviewBox
+# _ZOOM_     if {$::state(atlas)} {::ClipBox::Onscreen $::Zoom::W}
+# _ZOOM_     after idle ::Zoom::Expose
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::OverviewBox -- moves overview box on the grid window
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::OverviewBox {} {
+# _ZOOM_     variable W2
+# _ZOOM_     variable SCREEN
+# _ZOOM_
+# _ZOOM_     if {! [winfo exists $W2]} {
+# _ZOOM_         INFO "missing $W2"
+# _ZOOM_         return
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     set xy [::Zoom::Canvas2Small $SCREEN(l) $SCREEN(t) $SCREEN(r) $SCREEN(b)]
+# _ZOOM_     $W2 coords over $xy
+# _ZOOM_     ::Zoom::OverviewVisible $xy
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::OverviewVisible -- keeps center of the overview box visible
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::OverviewVisible {xy} {
+# _ZOOM_     variable W2
+# _ZOOM_     foreach {x0 y0 x1 y1} $xy break             ;# Coordinates of overview box
+# _ZOOM_     set x [expr {($x0 + $x1) / 2}]              ;# Center of overview box
+# _ZOOM_     set y [expr {($y0 + $y1) / 2}]
+# _ZOOM_
+# _ZOOM_     foreach {l t r b} [::Display::GetScreenRect $W2] break
+# _ZOOM_     if {$x <= $r && $y <= $b && $x >= $l && $y >= $t} return ;# Visible
+# _ZOOM_     foreach {l t r b} [$W2 cget -scrollregion] break
+# _ZOOM_     set cw [winfo width $W2]
+# _ZOOM_     set ch [winfo height $W2]
+# _ZOOM_
+# _ZOOM_     set xview [expr {(($x - $cw/2.0) - $l) / ($r - $l)}]
+# _ZOOM_     set yview [expr {(($y - $ch/2.0) - $t) / ($b - $t)}]
+# _ZOOM_
+# _ZOOM_     $W2 xview moveto $xview
+# _ZOOM_     $W2 yview moveto $yview
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetScreenRect -- gets coordinates of the visible part of the canvas
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetScreenRect {} {
+# _ZOOM_     variable SCREEN
+# _ZOOM_     variable W
+# _ZOOM_
+# _ZOOM_     foreach {sl st sr sb} [$W cget -scrollregion] break
+# _ZOOM_     set sw [expr {$sr - $sl}]                   ;# Scroll width
+# _ZOOM_     set sh [expr {$sb - $st}]                   ;# Scroll height
+# _ZOOM_
+# _ZOOM_     # Get canvas info (could have used scrollbar for this)
+# _ZOOM_     foreach {xl xr} [$W xview] break
+# _ZOOM_     foreach {yt yb} [$W yview] break
+# _ZOOM_
+# _ZOOM_     set SCREEN(l) [expr {round($sl + $xl * $sw)}]
+# _ZOOM_     set SCREEN(r) [expr {round($sl + $xr * $sw)}]
+# _ZOOM_     set SCREEN(t) [expr {round($st + $yt * $sh)}]
+# _ZOOM_     set SCREEN(b) [expr {round($st + $yb * $sh)}]
+# _ZOOM_
+# _ZOOM_     set SCREEN(w) [expr {$SCREEN(r) - $SCREEN(l)}]
+# _ZOOM_     set SCREEN(h) [expr {$SCREEN(b) - $SCREEN(t)}]
+# _ZOOM_
+# _ZOOM_     set SCREEN(rows) [expr {int(ceil($SCREEN(h) / 200.0))}]
+# _ZOOM_     set SCREEN(cols) [expr {int(ceil($SCREEN(w) / 200.0))}]
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::Layout -- figures out cells that are on the map
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::Layout {} {
+# _ZOOM_     variable SCREEN
+# _ZOOM_     variable ZMAP
+# _ZOOM_     variable RINFO
+# _ZOOM_
+# _ZOOM_     ::Zoom::Clear
+# _ZOOM_     set core [::Zoom::GetCellsOverCore]
+# _ZOOM_
+# _ZOOM_     foreach {ZMAP(o,x) ZMAP(o,y)} [lindex $core 0] break
+# _ZOOM_     incr ZMAP(o,x) -1 ; incr ZMAP(o,y) 2        ;# Put in center of window
+# _ZOOM_
+# _ZOOM_     foreach {t l b r} [::Zoom::GetBbox $core] break
+# _ZOOM_     set extra [expr {$SCREEN(cols) - ($r - $l + 1)}]
+# _ZOOM_     if {$extra > 0} {
+# _ZOOM_         incr l [expr {-int(ceil($extra / 2.0))}]
+# _ZOOM_         incr r [expr {$extra / 2}]
+# _ZOOM_     }
+# _ZOOM_     set extra [expr {$SCREEN(rows) - ($t - $b + 1)}]
+# _ZOOM_     if {$extra > 0} {
+# _ZOOM_         incr t [expr {int(ceil($extra / 2.0))}]
+# _ZOOM_         incr b [expr {-($extra / 2)}]
+# _ZOOM_     }
+# _ZOOM_     incr t ; incr l -1                          ;# Supply a margin
+# _ZOOM_     incr b -1 ; incr r
+# _ZOOM_     set ZMAP(cells) [::Zoom::GetInnerCells [list $l $t] [list $r $b]]
+# _ZOOM_     set ZMAP(bbox) [list $t $l $b $r]
+# _ZOOM_     set ZMAP(core) $core
+# _ZOOM_     set ZMAP(width) [expr {$r - $l + 1}]
+# _ZOOM_     set ZMAP(height) [expr {$t - $b + 1}]
+# _ZOOM_     set ZMAP(zone) [lindex $RINFO(pts) 0 6 2]
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetDetails -- gets meta info about road or node
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetDetails {what who} {
+# _ZOOM_     variable RINFO
+# _ZOOM_
+# _ZOOM_     array unset ::Zoom::RINFO
+# _ZOOM_     set RINFO(what) $what
+# _ZOOM_     set RINFO(who) $who
+# _ZOOM_     if {$what eq "road"} {
+# _ZOOM_         ::Zoom::GetRoadInfo $who
+# _ZOOM_     } elseif {$what eq "node"} {
+# _ZOOM_         ::Zoom::GetNodeInfo $who
+# _ZOOM_     } elseif {$what eq "route"} {
+# _ZOOM_         ::Zoom::GetRouteInfo
+# _ZOOM_     } elseif {$what eq "track"} {
+# _ZOOM_         ::Zoom::GetTrackInfo $who
+# _ZOOM_     } elseif {$what eq "coords"} {
+# _ZOOM_         ::Zoom::GetCoordsInfo $who
+# _ZOOM_     } elseif {$what eq "poi" || $what eq "geo"} {
+# _ZOOM_         ::Zoom::GetPOIInfo $what $who
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     ::Zoom::SwapNodeRoad $what
+# _ZOOM_     ::Zoom::DisplayReadOnly
+# _ZOOM_     ::Zoom::IsModified 0
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetRoadInfo -- fills in RINFO w/ data about the road
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetRoadInfo {who} {
+# _ZOOM_     variable RINFO
+# _ZOOM_
+# _ZOOM_     set RINFO(pts) [::Route::GetXYZ $who]       ;# All the bends in the road
+# _ZOOM_     foreach {. . RINFO(north) RINFO(dist) RINFO(south) RINFO(type) \
+# _ZOOM_                  RINFO(title)} $::roads($who) break
+# _ZOOM_     ::Zoom::GuessDistance
+# _ZOOM_     ::Zoom::GuessClimbing
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetNodeInfo -- fills in RINFO w/ data about the node
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetNodeInfo {who} {
+# _ZOOM_     variable RINFO
+# _ZOOM_
+# _ZOOM_     set RINFO(pts) [::Route::GetXYZ "" $who]
+# _ZOOM_     foreach {RINFO(title) RINFO(ele) lat lon} [lindex $RINFO(pts) 0] break
+# _ZOOM_     set usgs [lindex $RINFO(pts) 0 8]
+# _ZOOM_     if {$usgs eq {}} {set usgs "0+?"}
+# _ZOOM_     set RINFO(usgs) [::Data::Label $usgs climb 3 2]
+# _ZOOM_
+# _ZOOM_     set utm [::Data::ll2utm $lat $lon]
+# _ZOOM_     lset RINFO(pts) 0 6 $utm
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetPOIInfo -- Gets info about a POI
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetPOIInfo {what who} {
+# _ZOOM_     variable RINFO
+# _ZOOM_     global poi
+# _ZOOM_
+# _ZOOM_     if {$what eq "poi"} {
+# _ZOOM_         foreach {RINFO(type) RINFO(title) lat lon RINFO(loc) RINFO(desc)} \
+# _ZOOM_             $poi($who) break
+# _ZOOM_         set utm [::Data::ll2utm $lat $lon]
+# _ZOOM_         set RINFO(pts) [list [list $RINFO(title) ? $lat $lon poi $who $utm]]
+# _ZOOM_         return
+# _ZOOM_     }
+# _ZOOM_     if {$what eq "geo"} {
+# _ZOOM_         foreach {lat lon . RINFO(title)} $::GPS::wpts($who) break
+# _ZOOM_         set utm [::Data::ll2utm $lat $lon]
+# _ZOOM_         set RINFO(pts) [list [list $RINFO(title) ? $lat $lon geo $who $utm]]
+# _ZOOM_         return
+# _ZOOM_     }
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetRouteInfo -- fills in RINFO w/ data about the current route
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetRouteInfo {} {
+# _ZOOM_    variable RINFO
+# _ZOOM_
+# _ZOOM_     set RINFO(pts) [::Route::GetXYZ]
+# _ZOOM_     set RINFO(title) "Current Route"
+# _ZOOM_     set RINFO(dist) $::msg(dist2)
+# _ZOOM_     set RINFO(climb) $::msg(climb2)
+# _ZOOM_     set RINFO(desc) $::msg(desc2)
+# _ZOOM_     set ::Zoom::ZMAP(readonly) 1
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetTrackInfo -- fills RINFO w/ data about a GPS track
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetTrackInfo {who} {
+# _ZOOM_     variable RINFO
+# _ZOOM_
+# _ZOOM_     set rpts [::GPS::GetXYZ $who]
+# _ZOOM_     set wpts [::GPS::GetWpts]
+# _ZOOM_     set RINFO(pts) [concat $rpts $wpts]
+# _ZOOM_
+# _ZOOM_     #set all [::Tracks::GetInfo $who]
+# _ZOOM_
+# _ZOOM_     foreach var [list title dist climb desc] val [::Tracks::GetInfo $who] {
+# _ZOOM_         set RINFO($var) $val
+# _ZOOM_     }
+# _ZOOM_     set ::Zoom::ZMAP(readonly) 1
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetCoordsInfo -- fills RINFO w/ data about current coord
+# _ZOOM_ # can be called from coordinate locator or directly from map popup
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetCoordsInfo {who} {
+# _ZOOM_     variable RINFO
+# _ZOOM_
+# _ZOOM_     set RINFO(title) "User Coordinates"
+# _ZOOM_     if {$who eq "map"} {
+# _ZOOM_         foreach {x y} $::state(popup) break
+# _ZOOM_         foreach {. . . . lat lon} [::Display::canvas2pos $x $y] break
+# _ZOOM_         set lat [int2lat $lat]
+# _ZOOM_         set lon [int2lat $lon]
+# _ZOOM_     } else {
+# _ZOOM_         foreach {lat lon} [::Coords::Where] break
+# _ZOOM_     }
+# _ZOOM_     foreach {RINFO(lat) RINFO(lon)} [::Display::PrettyLat $lat $lon] break
+# _ZOOM_     set lat [eval lat2int $lat]
+# _ZOOM_     set lon [eval lat2int $lon]
+# _ZOOM_
+# _ZOOM_     set RINFO(pts) [list [list "" ? $lat $lon coords "" ""]]
+# _ZOOM_     set ::Zoom::ZMAP(readonly) 1
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetInnerCells -- returns list of all cells w/i x0,y0 - x1,y1
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetInnerCells {xy0 xy1} {
+# _ZOOM_     foreach {x0 y0} $xy0 {x1 y1} $xy1 break
+# _ZOOM_     if {$x0 > $x1} {foreach x0 $x1 x1 $x0 break}
+# _ZOOM_     if {$y0 > $y1} {foreach y0 $y1 y1 $y0 break}
+# _ZOOM_
+# _ZOOM_     set cells {}
+# _ZOOM_     for {set x $x0} {$x <= $x1} {incr x} {
+# _ZOOM_         for {set y $y1} {$y >= $y0} {incr y -1} {
+# _ZOOM_             lappend cells [list $x $y]
+# _ZOOM_         }
+# _ZOOM_     }
+# _ZOOM_     return $cells
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetCoreCells -- gets cells along straight line from two points
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetCoreCells {x0 y0 x1 y1} {
+# _ZOOM_     set dx [expr {abs($x1 - $x0) / 2.0}]
+# _ZOOM_     set dy [expr {abs($y1 - $y0) / 2.0}]
+# _ZOOM_
+# _ZOOM_     if {$dx > 1 || $dy > 1} {
+# _ZOOM_         set x2 [expr {($x0 + $x1) / 2}]
+# _ZOOM_         set y2 [expr {($y0 + $y1) / 2}]
+# _ZOOM_
+# _ZOOM_         set cells1 [::Zoom::GetCoreCells $x0 $y0 $x2 $y2]
+# _ZOOM_         set cells2 [::Zoom::GetCoreCells $x2 $y2 $x1 $y1]
+# _ZOOM_         set cells [concat $cells2 $cells1]
+# _ZOOM_     } else {
+# _ZOOM_         set cells [::Zoom::GetInnerCells [list $x0 $y0] [list $x1 $y1]]
+# _ZOOM_     }
+# _ZOOM_     return $cells
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::ShowCore -- debugging routines highlight core cells
+# _ZOOM_ # in the status window
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::ShowCore {} {
+# _ZOOM_     variable ZMAP
+# _ZOOM_
+# _ZOOM_     foreach cell $ZMAP(core) {
+# _ZOOM_         foreach {x y} $cell break
+# _ZOOM_         ::Zoom::Status $x $y cancel
+# _ZOOM_     }
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetCellsOverCore -- returns list of cells to cover all pts
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetCellsOverCore {} {
+# _ZOOM_     variable RINFO
+# _ZOOM_
+# _ZOOM_     # Convert all to UTM and get bounding box
+# _ZOOM_     unset -nocomplain mcells
+# _ZOOM_     set idx -1
+# _ZOOM_     foreach pt $RINFO(pts) {
+# _ZOOM_         incr idx
+# _ZOOM_         foreach {name ele lat lon type who utm} $pt break
+# _ZOOM_         if {$utm eq ""} {
+# _ZOOM_             set utm [::Data::ll2utm $lat $lon]
+# _ZOOM_             lset RINFO(pts) $idx 6 $utm
+# _ZOOM_         }
+# _ZOOM_         set xy1 [lrange [::Zoom::ChunkUTM $utm] 0 1]
+# _ZOOM_         if {$idx == 0} {
+# _ZOOM_             set org $xy1
+# _ZOOM_             set mcells($xy1) 1
+# _ZOOM_         } else {
+# _ZOOM_             foreach cell [eval ::Zoom::GetCoreCells $xy0 $xy1] {
+# _ZOOM_                 set mcells($cell) 1
+# _ZOOM_             }
+# _ZOOM_         }
+# _ZOOM_         set xy0 $xy1
+# _ZOOM_     }
+# _ZOOM_     unset mcells($org)          ;# Put origin first
+# _ZOOM_     return [concat [list $org] [array names mcells]]
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetBbox -- gets bounding box for a set of cells
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetBbox {cells} {
+# _ZOOM_     set first [lindex $cells 0]
+# _ZOOM_     foreach {x y} $first break
+# _ZOOM_     set t [set b $y]
+# _ZOOM_     set l [set r $x]
+# _ZOOM_
+# _ZOOM_     foreach cell $cells {
+# _ZOOM_         foreach {x y} $cell break
+# _ZOOM_         if {$y > $t} { set t $y } elseif {$y < $b} { set b $y}
+# _ZOOM_         if {$x > $r} { set r $x } elseif {$x < $l} { set l $x}
+# _ZOOM_     }
+# _ZOOM_     return [list $t $l $b $r]
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::ChunkUTM -- takes a UTM coord and a scale and returns
+# _ZOOM_ # the chunk values that terra server wants to fetch that page. It also
+# _ZOOM_ # returns the excess into that chunk.
+# _ZOOM_ #
+# _ZOOM_ # NB. returns x,y NOT northing, easting
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::ChunkUTM {utm {sscale -1}} {
+# _ZOOM_     if {$sscale == -1} {set sscale $::Zoom::ZMAP(mag)}
+# _ZOOM_
+# _ZOOM_     foreach {north east . letter} $utm break
+# _ZOOM_
+# _ZOOM_     set mult [expr {int(100 * pow(2,$sscale-9))}]
+# _ZOOM_     set eX [expr {$east / double($mult)}]
+# _ZOOM_     set eY [expr {$north / double($mult)}]
+# _ZOOM_     set XX [expr {int($eX)}]
+# _ZOOM_     set YY [expr {int($eY)}]
+# _ZOOM_
+# _ZOOM_     return [list $XX $YY $eX $eY]
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::Close -- cleans up and closes all the zoom windows
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::Close {} {
+# _ZOOM_     ::PGU::Cancel
+# _ZOOM_     ::Zoom::Clear
+# _ZOOM_     destroy $::Zoom::T
+# _ZOOM_     ::Atlas::Reparent
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # DrawGrid -- draws the grid laid out by MakeLayout
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::DrawGrid {} {
+# _ZOOM_     variable ZMAP
+# _ZOOM_     variable W
+# _ZOOM_     variable W2
+# _ZOOM_     variable COLORS
+# _ZOOM_
+# _ZOOM_     $W delete cell
+# _ZOOM_     catch {$W2 delete cell}
+# _ZOOM_     set ww [expr {$ZMAP(width) * 200.0 / ([winfo width $W2] - 5)}]
+# _ZOOM_     set hh [expr {$ZMAP(height) * 200.0 / ([winfo height $W2] - 5)}]
+# _ZOOM_     set small [expr {$ww > $hh ? $ww : $hh}]
+# _ZOOM_     if {$small > 30} {set small 30.0}
+# _ZOOM_     set ::Zoom::STATIC(small) $small
+# _ZOOM_
+# _ZOOM_     foreach cell $ZMAP(cells) {
+# _ZOOM_         foreach {XX YY} $cell break
+# _ZOOM_         set xy [::Zoom::CellBox $XX $YY]
+# _ZOOM_         $W create rect $xy -tag [list cell cell$XX,$YY]
+# _ZOOM_         set xys [eval ::Zoom::Canvas2Small $xy]
+# _ZOOM_         $W2 create rect $xys -tag [list cell cell$XX,$YY] -fill $COLORS(empty)
+# _ZOOM_
+# _ZOOM_         #continue
+# _ZOOM_         # This draws id in each cell
+# _ZOOM_         foreach {x0 y0 x1 y1} $xy break
+# _ZOOM_         set x [expr {($x0 + $x1) / 2}]
+# _ZOOM_         set y [expr {($y0 + $y1) / 2}]
+# _ZOOM_         $W create text $x $y -tag cell -text "$XX,$YY" -font {Helvetica 18 bold}
+# _ZOOM_     }
+# _ZOOM_     $W config -scrollregion [$W bbox all]
+# _ZOOM_     $W2 config -scrollregion [$W2 bbox all]
+# _ZOOM_     $W2 create rect -1000 -1000 -1000 -1000 -tag over -width 4
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # CellBox -- returns coordinates of a given cell
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::CellBox {XX YY {z 0}} {
+# _ZOOM_     set xy1 [::Zoom::Chunk2canvas $XX [expr {$YY+1}] $z] ;# Upper left corner
+# _ZOOM_     set xy2 [::Zoom::Chunk2canvas [expr {$XX+1}] $YY $z] ;# Lower right corner
+# _ZOOM_     return [concat $xy1 $xy2]
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::Chunk2canvas -- returns x,y of lower left corner of a chunk
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::Chunk2canvas {XX YY {small 0}} {
+# _ZOOM_     variable ZMAP
+# _ZOOM_     variable STATIC
+# _ZOOM_
+# _ZOOM_     set z [expr {$small ? $STATIC(small) : 1}]
+# _ZOOM_     set x [expr {200 * ($XX-$ZMAP(o,x)) / $z}]
+# _ZOOM_     set y [expr {200 * ($ZMAP(o,y)-$YY) / $z}]
+# _ZOOM_     return [list $x $y]
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::DrawPoints -- draws all the points in RINFO(pts)
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::DrawPoints {} {
+# _ZOOM_     variable ZMAP
+# _ZOOM_     variable RINFO
+# _ZOOM_     variable W
+# _ZOOM_     variable W2
+# _ZOOM_     global nodes state
+# _ZOOM_
+# _ZOOM_     $W delete route
+# _ZOOM_     $W2 delete route
+# _ZOOM_
+# _ZOOM_     set bindAll [expr {$ZMAP(what) ne "road"}]
+# _ZOOM_     set xy {}
+# _ZOOM_     set xys {}
+# _ZOOM_     set cnt -1
+# _ZOOM_     set color $state(n,0,color)
+# _ZOOM_     foreach pt $RINFO(pts) {
+# _ZOOM_         incr cnt
+# _ZOOM_         foreach {name ele lat lon type who utm} $pt break
+# _ZOOM_         foreach {x y} [::Zoom::utm2canvas $utm] break
+# _ZOOM_         lappend xy $x $y
+# _ZOOM_         foreach {xs ys} [::Zoom::utm2canvas $utm 1] break
+# _ZOOM_         lappend xys $xs $ys
+# _ZOOM_
+# _ZOOM_         set tag pt_$cnt
+# _ZOOM_         set tag2 ppt_$cnt
+# _ZOOM_         ::Balloon::Delete [list $W $tag]
+# _ZOOM_         ::Balloon::Delete [list $W2 $tag]
+# _ZOOM_
+# _ZOOM_         if {$type eq "waypoint"} {
+# _ZOOM_             set item [expr {[string match "X*" $who] ? "rect" : "oval"}]
+# _ZOOM_             set coords [::Display::MakeBox [list $x $y] $state(n,size)]
+# _ZOOM_             $W create $item $coords -tag [list route node $tag] -fill $color
+# _ZOOM_
+# _ZOOM_             set coords2 [::Display::MakeBox [list $xs $ys] 5]
+# _ZOOM_             $W2 create $item $coords2 -tag [list route node $tag] -fill $color
+# _ZOOM_
+# _ZOOM_             set txt ""
+# _ZOOM_             regexp {[A-Za-z0-9]+} [string map {n {} N {}} $who] txt
+# _ZOOM_             if {$state(n,size) > 8} {
+# _ZOOM_                 $W create text $x $y -tag [list route node $tag] \
+# _ZOOM_                     -font {times 8} -text $txt
+# _ZOOM_             }
+# _ZOOM_             if {$::state(me) && $ZMAP(what) eq "node"} {
+# _ZOOM_                 foreach {x0 y0 x1 y1} $coords break
+# _ZOOM_                 $W create line $x0 $y0 $x1 $y1 -tag [list route node a $tag] \
+# _ZOOM_                     -width 2
+# _ZOOM_                 $W create line $x0 $y1 $x1 $y0 -tag [list route node a $tag] \
+# _ZOOM_                     -width 2
+# _ZOOM_             }
+# _ZOOM_
+# _ZOOM_             ::Balloon::Create [list $W $tag] node $who "" ""
+# _ZOOM_             ::Balloon::Create [list $W2 $tag] node $who "" ""
+# _ZOOM_             if {$bindAll && ! $ZMAP(readonly)} {
+# _ZOOM_                 $W bind $tag <Button-1> \
+# _ZOOM_                     [list ::Zoom::MoveNode down $tag $cnt %x %y]
+# _ZOOM_                 $W bind $tag <B1-Motion> \
+# _ZOOM_                     [list ::Zoom::MoveNode move $tag $cnt %x %y]
+# _ZOOM_             }
+# _ZOOM_         } elseif {$type eq "trackpoint"} {
+# _ZOOM_             set coords [::Display::MakeBox [list $x $y] $state(n,size)]
+# _ZOOM_             $W create oval $coords -tag [list trackpoint $tag] -fill $color
+# _ZOOM_             set coords2 [::Display::MakeBox [list $xs $ys] 5]
+# _ZOOM_             $W2 create oval $coords2 -tag [list trackpoint $tag] -fill $color
+# _ZOOM_             set xy [lrange $xy 0 end-2]
+# _ZOOM_             set xys [lrange $xys 0 end-2]
+# _ZOOM_
+# _ZOOM_             ::Balloon::Create [list $W $tag] trkpt $name $name $name
+# _ZOOM_             ::Balloon::Create [list $W2 $tag] trkpt $name $name $name
+# _ZOOM_         } elseif {$type eq "poi"} {
+# _ZOOM_             set coords [::Display::MakeStar [list $x $y] \
+# _ZOOM_                             [expr {2*$state(p,size)}]]
+# _ZOOM_             $W create poly $coords -fill $state(p,color) \
+# _ZOOM_                 -tag [list route node $tag]
+# _ZOOM_             set coords [::Display::MakeStar [list $xs $ys] 10]
+# _ZOOM_             $W2 create poly $coords -fill $state(p,color) \
+# _ZOOM_                 -tag [list route node $tag]
+# _ZOOM_             ::Balloon::Create [list $W $tag] poi $who
+# _ZOOM_             ::Balloon::Create [list $W2 $tag] poi $who
+# _ZOOM_
+# _ZOOM_             if {$bindAll && ! $ZMAP(readonly)} {
+# _ZOOM_                 $W bind $tag <Button-1> \
+# _ZOOM_                     [list ::Zoom::MoveNode down $tag $cnt %x %y]
+# _ZOOM_                 $W bind $tag <B1-Motion> \
+# _ZOOM_                     [list ::Zoom::MoveNode move $tag $cnt %x %y]
+# _ZOOM_             }
+# _ZOOM_         } elseif {$type eq "geo"} {
+# _ZOOM_             ::GPS::Symbol $W [list $x $y] g [list route geo $tag] 2
+# _ZOOM_             ::GPS::Symbol $W2 [list $xs $ys] g [list route geo $tag]
+# _ZOOM_             ::Balloon::Create [list $W $tag] wpt $who
+# _ZOOM_             ::Balloon::Create [list $W2 $tag] wpt $who
+# _ZOOM_             if {$bindAll && ! $ZMAP(readonly)} {
+# _ZOOM_                 $W bind $tag <Button-1> \
+# _ZOOM_                     [list ::Zoom::MoveNode down $tag $cnt %x %y]
+# _ZOOM_                 $W bind $tag <B1-Motion> \
+# _ZOOM_                     [list ::Zoom::MoveNode move $tag $cnt %x %y]
+# _ZOOM_             }
+# _ZOOM_         } elseif {$type eq "coords"} {
+# _ZOOM_             set ltag [list route node $tag]
+# _ZOOM_             $W create line $x -99999 $x 99999 -tag $ltag -width 2
+# _ZOOM_             $W create line -99999 $y 99999 $y -tag $ltag -width 2
+# _ZOOM_             $W2 create line $xs -99999 $xs 99999 -tag $ltag -width 2
+# _ZOOM_             $W2 create line -99999 $ys 99999 $ys -tag $ltag -width 2
+# _ZOOM_
+# _ZOOM_             set coords [::Display::MakeBox [list $x $y] $state(n,size)]
+# _ZOOM_             $W create oval $coords -tag $ltag -fill $color -width 2
+# _ZOOM_
+# _ZOOM_             set coords [::Display::MakeBox [list $xs $ys] 5]
+# _ZOOM_             $W2 create oval $coords -tag $ltag -fill $color -width 2
+# _ZOOM_
+# _ZOOM_         } else {                                ;# Routepoints
+# _ZOOM_             set coords [::Display::MakeBox [list $x $y] 4]
+# _ZOOM_             $W create oval $coords -tag [list route rtept $tag] -fill $color
+# _ZOOM_             if {[string is double -strict $ele]} {
+# _ZOOM_                 $W create oval [::Display::MakeBox [list $x $y] 1] -fill black \
+# _ZOOM_                     -tag [list route rtept $tag $tag2]
+# _ZOOM_             }
+# _ZOOM_
+# _ZOOM_             set coords [::Display::MakeBox [list $xs $ys] 3]
+# _ZOOM_             $W2 create oval $coords -fill $color -tag [list route rtept $tag]
+# _ZOOM_
+# _ZOOM_             $W bind $tag <<MenuMousePress>> \
+# _ZOOM_                 [list ::Zoom::DoPopupMenu %x %y rtept $cnt]
+# _ZOOM_             if {! $ZMAP(readonly)} {
+# _ZOOM_                 $W bind $tag <Control-Button-2> \
+# _ZOOM_                     [list ::Zoom::DoPopupMenu %x %y delete $cnt]
+# _ZOOM_                 $W bind $tag <Button-1> \
+# _ZOOM_                     [list ::Zoom::MoveNode down $tag $cnt %x %y]
+# _ZOOM_                 $W bind $tag <B1-Motion> \
+# _ZOOM_                     [list ::Zoom::MoveNode move $tag $cnt %x %y]
+# _ZOOM_             }
+# _ZOOM_         }
+# _ZOOM_     }
+# _ZOOM_     if {[llength $xy] > 2} {
+# _ZOOM_         set clr $state(r,0,9,color)
+# _ZOOM_         set width $state(r,0,9,width)
+# _ZOOM_         $W create line $xy -tag {route road} -fill $clr -width $width
+# _ZOOM_         $W2 create line $xys -tag {route road} -fill $clr -width $width
+# _ZOOM_         ::Balloon::Create [list $W road] road $who "" ""
+# _ZOOM_         ::Balloon::Create [list $W2 road] road $who "" ""
+# _ZOOM_     }
+# _ZOOM_     $W raise node
+# _ZOOM_     $W raise geo
+# _ZOOM_     $W raise rtept
+# _ZOOM_     $W raise trackpoint
+# _ZOOM_     $W raise milepost
+# _ZOOM_     $W raise arrow
+# _ZOOM_     $W raise zoom
+# _ZOOM_     $W raise BOX
+# _ZOOM_     $W2 raise node
+# _ZOOM_     $W2 raise geo
+# _ZOOM_     $W2 raise rtept
+# _ZOOM_     $W2 raise trackpoint
+# _ZOOM_     if {$ZMAP(mag) > 13} { $W lower rtept }
+# _ZOOM_
+# _ZOOM_     bind $W <Control-Button-1> break            ;# Disable bend road buttons
+# _ZOOM_     bind $W <Control-Button-2> break
+# _ZOOM_
+# _ZOOM_     $W bind img <<MenuMousePress>> "::Zoom::DoPopupMenu %x %y map; break"
+# _ZOOM_     if {$ZMAP(what) eq "node"} {
+# _ZOOM_         $W bind road <<MenuMousePress>> {::Zoom::DoPopupMenu %x %y node; break}
+# _ZOOM_         if {! $ZMAP(readonly)} {
+# _ZOOM_             $W bind node <Enter> [list $W config -cursor hand2]
+# _ZOOM_             $W bind node <Leave> [list $W config -cursor {}]
+# _ZOOM_         }
+# _ZOOM_     } else {
+# _ZOOM_         $W bind road <<MenuMousePress>> {::Zoom::DoPopupMenu %x %y road; break}
+# _ZOOM_         if {! $ZMAP(readonly)} {
+# _ZOOM_             $W bind road <Control-Button-3> {::Zoom::DoPopupMenu %x %y add; break}
+# _ZOOM_             $W bind img <Control-Button-3> {::Zoom::DoPopupMenu %x %y add; break}
+# _ZOOM_             $W bind rtept <Enter> [list $W config -cursor hand2]
+# _ZOOM_             $W bind rtept <Leave> [list $W config -cursor {}]
+# _ZOOM_         }
+# _ZOOM_     }
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::MoveNode -- moves a route point to the mouse position
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::MoveNode {what tag idx x y} {
+# _ZOOM_     variable ZMAP
+# _ZOOM_     variable RINFO
+# _ZOOM_     variable W
+# _ZOOM_     variable W2
+# _ZOOM_     variable lcxy                               ;# Last cursor xy
+# _ZOOM_
+# _ZOOM_     if {$ZMAP(readonly) || ! $ZMAP(ready)} return
+# _ZOOM_     set cx [$W canvasx $x]
+# _ZOOM_     set cy [$W canvasy $y]
+# _ZOOM_     set cxy [list $cx $cy]
+# _ZOOM_
+# _ZOOM_     if {$what eq "down"} {
+# _ZOOM_         set lcxy $cxy
+# _ZOOM_         ::Balloon::Cancel
+# _ZOOM_         return
+# _ZOOM_     } elseif {$what eq "up"} {
+# _ZOOM_         # Enable balloon help
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     foreach {dx dy} $lcxy break
+# _ZOOM_     set lcxy $cxy
+# _ZOOM_
+# _ZOOM_     # Move the node
+# _ZOOM_     set dx [expr {$cx - $dx}]
+# _ZOOM_     set dy [expr {$cy - $dy}]
+# _ZOOM_     $W move $tag $dx $dy
+# _ZOOM_     eval $W2 move $tag [::Zoom::Canvas2Small $dx $dy]
+# _ZOOM_
+# _ZOOM_     # Move the road
+# _ZOOM_     set xy [$W coords road]
+# _ZOOM_     if {$xy ne {}} {
+# _ZOOM_         lset xy [expr {2 * $idx}] $cx
+# _ZOOM_         lset xy [expr {2 * $idx + 1}] $cy
+# _ZOOM_         $W coords road $xy
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     set xy [$W2 coords road]
+# _ZOOM_     if {$xy ne {}} {
+# _ZOOM_         foreach {sx sy} [::Zoom::Canvas2Small $cx $cy] break
+# _ZOOM_         lset xy [expr {2 * $idx}] $sx
+# _ZOOM_         lset xy [expr {2 * $idx + 1}] $sy
+# _ZOOM_         $W2 coords road $xy
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     # Update the points list
+# _ZOOM_     # NB. don't use cx,cy because that's anywhere on the circle
+# _ZOOM_     foreach {x0 y0} [::Data::BboxCenter [$W bbox $tag]] break
+# _ZOOM_     set utm [::Zoom::canvas2utm $x0 $y0]
+# _ZOOM_     lset RINFO(pts) $idx 6 $utm                 ;# Put in new UTM position
+# _ZOOM_     lset RINFO(pts) $idx 2 0                    ;# Erase lat/lon position
+# _ZOOM_     lset RINFO(pts) $idx 3 0
+# _ZOOM_     if {[lindex $RINFO(pts) $idx 1] ne "?"} {
+# _ZOOM_         lset RINFO(pts) $idx 1 ?                ;# Destroy elevation info
+# _ZOOM_         $W delete ppt_$idx
+# _ZOOM_     }
+# _ZOOM_     ::Zoom::IsModified 1
+# _ZOOM_     ::Zoom::GuessDistance
+# _ZOOM_     ::Zoom::GuessClimbing
+# _ZOOM_
+# _ZOOM_     set RINFO(usgs) ?
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GuessDistance -- how long the road is
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GuessDistance {} {
+# _ZOOM_     variable RINFO
+# _ZOOM_     variable ZMAP
+# _ZOOM_
+# _ZOOM_     set RINFO(guess,dist) ""
+# _ZOOM_     if {$ZMAP(what) ne "road"} return
+# _ZOOM_
+# _ZOOM_     set lat0 -1
+# _ZOOM_     set dist 0
+# _ZOOM_
+# _ZOOM_     set idx -1
+# _ZOOM_     foreach pt $RINFO(pts) {
+# _ZOOM_         incr idx
+# _ZOOM_         foreach {. . lat1 lon1 . . utm} $pt break
+# _ZOOM_         if {$lat1 == 0} {                       ;# In utm
+# _ZOOM_             foreach {lat1 lon1} [eval ::Data::utm2ll $utm] break
+# _ZOOM_             lset RINFO(pts) $idx 2 $lat1
+# _ZOOM_             lset RINFO(pts) $idx 3 $lon1
+# _ZOOM_         }
+# _ZOOM_
+# _ZOOM_         if {$lat0 != -1} {
+# _ZOOM_             set d [::Data::Distance $lat0 $lon0 $lat1 $lon1]
+# _ZOOM_             set dist [expr {$dist + $d}]
+# _ZOOM_         }
+# _ZOOM_         set lat0 $lat1
+# _ZOOM_         set lon0 $lon1
+# _ZOOM_     }
+# _ZOOM_     set RINFO(guess,dist) [::Data::Convert [Round1 $dist] dist]
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GuessClimbing -- computes climbing for a road smoothing
+# _ZOOM_ # out small bumps.
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GuessClimbing {} {
+# _ZOOM_     variable RINFO
+# _ZOOM_     variable ZMAP
+# _ZOOM_
+# _ZOOM_     set RINFO(guess,north) "?"
+# _ZOOM_     set RINFO(guess,south) "?"
+# _ZOOM_     if {$ZMAP(what) ne "road"} return
+# _ZOOM_
+# _ZOOM_     set z {}
+# _ZOOM_     foreach pt $RINFO(pts) {
+# _ZOOM_         set alt [lindex $pt 1]
+# _ZOOM_         if {[string is double -strict $alt]} {
+# _ZOOM_             lappend z $alt
+# _ZOOM_         }
+# _ZOOM_     }
+# _ZOOM_     if {[llength $z] < 2} return                ;# Not enough data points
+# _ZOOM_
+# _ZOOM_     foreach {climb desc} [::Data::PreCalcClimb $z] break
+# _ZOOM_     set RINFO(guess,north) $desc
+# _ZOOM_     set RINFO(guess,south) $climb
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # utm2canvas -- converts from utm into canvas coordinates
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::utm2canvas {utm {small 0}} {
+# _ZOOM_     foreach {. . eX eY} [::Zoom::ChunkUTM $utm] break
+# _ZOOM_     foreach {x y} [::Zoom::Chunk2canvas $eX $eY $small] break
+# _ZOOM_     return [list $x $y]
+# _ZOOM_ }
+# _ZOOM_ proc ::Zoom::ll2canvas {lat lon} {
+# _ZOOM_     set utm [::Data::ll2utm $lat $lon]
+# _ZOOM_     return [::Zoom::utm2canvas $utm]
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::NewMag -- handles changing zoom level
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::NewMag {delta} {
+# _ZOOM_     variable ZMAP
+# _ZOOM_     variable DS
+# _ZOOM_
+# _ZOOM_     if {! $ZMAP(ready)} return
+# _ZOOM_     if {$delta < 0 && $DS(mag) > 0} {
+# _ZOOM_         if {$DS(theme) ne "topo" || $DS(mag) > 1} {
+# _ZOOM_             incr DS(mag) -1
+# _ZOOM_         }
+# _ZOOM_     } elseif {$delta > 0 && $DS(mag) < 9} {
+# _ZOOM_         incr DS(mag)
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     if {$DS(mag) + 10 == $ZMAP(mag)} return     ;# Hasn't changed
+# _ZOOM_     ::Zoom::MakeMap
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # NewTheme -- Handles changing between topo and aerial views
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::NewTheme {} {
+# _ZOOM_     variable ZMAP
+# _ZOOM_     variable DS
+# _ZOOM_
+# _ZOOM_     if {$DS(theme) eq "topo"} {
+# _ZOOM_         raise $::Zoom::T.left.b-2_cover         ;# Hide illegal mag level
+# _ZOOM_         raise $::Zoom::T.left.b-1_cover
+# _ZOOM_         raise $::Zoom::T.left.b0_cover
+# _ZOOM_         if {$DS(mag) <= 0} {                    ;# Not legal mag value
+# _ZOOM_             set DS(mag) 1
+# _ZOOM_         }
+# _ZOOM_     } elseif {$DS(theme) eq "aerial"} {
+# _ZOOM_         raise $::Zoom::T.left.b-2_cover         ;# Hide illegal mag level
+# _ZOOM_         raise $::Zoom::T.left.b-1_cover
+# _ZOOM_         lower $::Zoom::T.left.b0_cover
+# _ZOOM_         if {$DS(mag) < 0} {                     ;# Not legal mag value
+# _ZOOM_             set DS(mag) 0
+# _ZOOM_         }
+# _ZOOM_         if {$DS(mag) == 1} {
+# _ZOOM_             set DS(mag) 0
+# _ZOOM_         }
+# _ZOOM_     } else {                                    ;# Urban
+# _ZOOM_         lower $::Zoom::T.left.b-2_cover
+# _ZOOM_         lower $::Zoom::T.left.b-1_cover
+# _ZOOM_         lower $::Zoom::T.left.b0_cover
+# _ZOOM_         if {$DS(mag) == 1} {
+# _ZOOM_             set DS(mag) 0
+# _ZOOM_         }
+# _ZOOM_     }
+# _ZOOM_     if {! $ZMAP(ready)} return
+# _ZOOM_     if {$DS(theme) eq $ZMAP(theme) && $DS(mag) + 10 == $ZMAP(mag)} return
+# _ZOOM_     ::Zoom::MakeMap
+# _ZOOM_     return
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zone::DoDisplay -- Creates our GUI
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::DoDisplay {} {
+# _ZOOM_     global state
+# _ZOOM_     variable T
+# _ZOOM_     variable W
+# _ZOOM_     variable W2
+# _ZOOM_     variable DS
+# _ZOOM_     variable SCREEN
+# _ZOOM_     variable RINFO
+# _ZOOM_
+# _ZOOM_     if {[winfo exists $T]} {
+# _ZOOM_         ::Zoom::Clear
+# _ZOOM_         raise $T
+# _ZOOM_         set txt "Save [string totitle $::Zoom::ZMAP(what)] Data"
+# _ZOOM_         .sr_popup entryconfig 9 -label $txt
+# _ZOOM_         return
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     destroy $T
+# _ZOOM_     toplevel $T
+# _ZOOM_     wm geom $T +10+10
+# _ZOOM_     wm title $T "$::state(progname) Zoom"
+# _ZOOM_     wm transient $T .
+# _ZOOM_     wm protocol $T WM_DELETE_WINDOW ::Zoom::Close
+# _ZOOM_
+# _ZOOM_     set W "$T.c"
+# _ZOOM_
+# _ZOOM_     ::tk::frame $T.main -borderwidth 2 -relief ridge -background beige
+# _ZOOM_     ::my::frame $T.ctrl -borderwidth 2 -relief ridge -pad 5
+# _ZOOM_
+# _ZOOM_     ::my::label $T.title -background beige -borderwidth 0 \
+# _ZOOM_         -font bolderFont -anchor c -textvariable ::Zoom::DS(title) -pad 5
+# _ZOOM_     ::tk::frame $T.left -bg beige
+# _ZOOM_     ::ttk::scrollbar $T.sb_x -command [list $W xview] -orient horizontal
+# _ZOOM_     ::ttk::scrollbar $T.sb_y -command [list $W yview] -orient vertical
+# _ZOOM_     canvas $W -width $SCREEN(w) -height $SCREEN(h) -highlightthickness 0 \
+# _ZOOM_         -bg $::Zoom::COLORS(empty) -bd 0
+# _ZOOM_     $W config -xscrollcommand [list ::Zoom::MyScroller x]
+# _ZOOM_     $W config -yscrollcommand [list ::Zoom::MyScroller y]
+# _ZOOM_     $W config -scrollregion [list 0 0 [$W cget -width] [$W cget -height]]
+# _ZOOM_
+# _ZOOM_     # Road info
+# _ZOOM_     ::ttk::frame $T.data
+# _ZOOM_     ::Zoom::MakeRoadFrame $T.data
+# _ZOOM_     ::Zoom::MakeNodeFrame $T.data
+# _ZOOM_     ::Zoom::MakePOIFrame $T.data
+# _ZOOM_     ::Zoom::MakeGEOFrame $T.data
+# _ZOOM_     ::Zoom::MakeRouteFrame $T.data route
+# _ZOOM_     ::Zoom::MakeRouteFrame $T.data track
+# _ZOOM_     ::Zoom::MakeCoordsFrame $T.data
+# _ZOOM_
+# _ZOOM_     # Map status
+# _ZOOM_     ::my::labelframe $T.zgrid -text "Map Status"
+# _ZOOM_     set W2 "$T.zgrid.c"
+# _ZOOM_     ::ttk::scrollbar $T.zgrid.sb_x -command [list $W2 xview] -orient horizontal
+# _ZOOM_     ::ttk::scrollbar $T.zgrid.sb_y -command [list $W2 yview] -orient vertical
+# _ZOOM_     canvas $W2 -width 200 -height 200 -yscrollcommand [list $T.zgrid.sb_y set] \
+# _ZOOM_         -xscrollcommand [list $T.zgrid.sb_x set] -highlightthickness 0 \
+# _ZOOM_         -scrollregion {0 0 200 200}
+# _ZOOM_     ::Display::TileBGFix $W2
+# _ZOOM_     grid rowconfigure $T.zgrid 0 -minsize 10
+# _ZOOM_     grid $W2 $T.zgrid.sb_y -sticky news -row 1
+# _ZOOM_     grid $T.zgrid.sb_x -sticky news
+# _ZOOM_     grid rowconfigure $T.zgrid 1 -weight 1
+# _ZOOM_     grid columnconfigure $T.zgrid 0 -weight 1
+# _ZOOM_
+# _ZOOM_     # Legend
+# _ZOOM_     ::my::labelframe $T.zlegend -text "Map Legend"
+# _ZOOM_     set WW $T.zlegend
+# _ZOOM_     set items {Queued queued Fetching pending Retrieved done  \
+# _ZOOM_                    Web web Cache cache Empty empty \
+# _ZOOM_                    Timeout timeout Failure failure Discarded discarded}
+# _ZOOM_     set row 1
+# _ZOOM_     set col 0
+# _ZOOM_     foreach {txt color} $items {
+# _ZOOM_         ::tk::label $WW.$color -text $txt -anchor c -bd 1 -relief solid \
+# _ZOOM_             -bg $::Zoom::COLORS($color) -font boldFont
+# _ZOOM_         if {$::Zoom::COLORS($color) eq "blue"} { $WW.$color config -fg white}
+# _ZOOM_         grid $WW.$color -row $row -column $col -sticky ew -padx 5 -pady 2
+# _ZOOM_         if {[incr col] >= 3} {
+# _ZOOM_             incr row
+# _ZOOM_             set col 0
+# _ZOOM_         }
+# _ZOOM_     }
+# _ZOOM_     grid columnconfigure $WW {0 1 2} -weight 1 -uniform a
+# _ZOOM_     grid rowconfigure $WW 100 -minsize 5
+# _ZOOM_
+# _ZOOM_     # Internet statistics
+# _ZOOM_     ::my::labelframe $T.stats -text "Internet Statistics" -pad 5
+# _ZOOM_     ::my::label $T.lqueue -text Queued -anchor w
+# _ZOOM_     ::my::label $T.equeue -textvariable ::Zoom::stats(queued) -relief sunken \
+# _ZOOM_         -width 5 -anchor c
+# _ZOOM_     ::my::label $T.lload -text Loading -anchor w
+# _ZOOM_     ::my::label $T.eload -textvariable ::Zoom::stats(loading) -relief sunken \
+# _ZOOM_         -width 5 -anchor c
+# _ZOOM_     ::my::label $T.lretrieve -text Retrieved -anchor w
+# _ZOOM_     ::my::label $T.eretrieve -textvariable ::Zoom::stats(retrieved) \
+# _ZOOM_         -width 5 -relief sunken -anchor c
+# _ZOOM_     ::my::label $T.lrendered -text Rendered -anchor w
+# _ZOOM_     ::my::label $T.erendered -textvariable ::Zoom::stats(rendered) \
+# _ZOOM_         -width 5 -relief sunken -anchor c
+# _ZOOM_     grid $T.lqueue $T.equeue -in $T.stats -sticky ew
+# _ZOOM_     grid $T.lload $T.eload -in $T.stats -sticky ew
+# _ZOOM_     grid $T.lretrieve $T.eretrieve -in $T.stats -sticky ew
+# _ZOOM_     grid $T.lrendered $T.erendered -in $T.stats -sticky ew
+# _ZOOM_     grid columnconfigure $T.stats 0 -weight 1
+# _ZOOM_     grid columnconfigure $T.stats 5 -minsize 5
+# _ZOOM_
+# _ZOOM_     # Buttons
+# _ZOOM_     ::my::frame $T.buttons -borderwidth 2 -relief ridge
+# _ZOOM_     ::ttk::button $T.buttons.print -text "Print" -command [list ::Print::Dialog zoom]
+# _ZOOM_     ::ttk::button $T.buttons.save -text "Update" -command ::Zoom::Save -state disabled
+# _ZOOM_     ::ttk::button $T.buttons.dismiss -text "Dismiss" -command ::Zoom::Close
+# _ZOOM_     ::ttk::button $T.buttons.view -text "Google Maps" -command [list ::Zoom::Google zoom]
+# _ZOOM_
+# _ZOOM_     grid x $T.buttons.print x $T.buttons.view x -pady 5 -sticky ew
+# _ZOOM_     grid x $T.buttons.save x $T.buttons.dismiss x -pady 5 -sticky ew
+# _ZOOM_     grid columnconfigure $T.buttons {0 2 4} -weight 1
+# _ZOOM_     grid columnconfigure $T.buttons {1 3} -uniform a
+# _ZOOM_
+# _ZOOM_     # Grid outer frames
+# _ZOOM_     grid $T.main $T.ctrl -sticky news
+# _ZOOM_     grid columnconfigure $T 0 -weight 1
+# _ZOOM_     grid rowconfigure $T 0 -weight 1
+# _ZOOM_
+# _ZOOM_     # Grid main window
+# _ZOOM_     grid x $T.title x -in $T.main -sticky news -row 0
+# _ZOOM_     grid $T.left $W $T.sb_y -in $T.main -sticky news
+# _ZOOM_     grid ^ $T.sb_x x -in $T.main -sticky ew
+# _ZOOM_     grid columnconfigure $T.main 1 -weight 1
+# _ZOOM_     grid rowconfigure $T.main 1 -weight 1
+# _ZOOM_
+# _ZOOM_
+# _ZOOM_     # Grid the control frame
+# _ZOOM_     grid $T.data -in $T.ctrl -sticky news -pady 5
+# _ZOOM_     grid $T.zgrid -in $T.ctrl -sticky news -pady 5
+# _ZOOM_     grid $T.zlegend -in $T.ctrl -sticky news -pady 5
+# _ZOOM_     grid $T.stats -in $T.ctrl -sticky news -pady 5
+# _ZOOM_     grid rowconfigure $T.ctrl 100 -weight 1
+# _ZOOM_     grid $T.buttons -in $T.ctrl -sticky news -row 101
+# _ZOOM_
+# _ZOOM_     # Set up bindings
+# _ZOOM_     bind $W <2> [bind Text <2>]                 ;# Enable dragging w/ <2>
+# _ZOOM_     bind $W <B2-Motion> [bind Text <B2-Motion>]
+# _ZOOM_     $W bind img <1> [bind $W <2>]
+# _ZOOM_     $W bind img <B1-Motion> [bind $W <B2-Motion>]
+# _ZOOM_
+# _ZOOM_     bind $W2 <2> [bind Text <2>]                ;# Enable dragging w/ <2>
+# _ZOOM_     bind $W2 <B2-Motion> [bind Text <B2-Motion>]
+# _ZOOM_     $W2 bind img <1> [bind $W2 <2>]
+# _ZOOM_     $W2 bind img <B1-Motion> [bind $W2 <B2-Motion>]
+# _ZOOM_     if {$::state(su)} {
+# _ZOOM_         catch {bind .zoom <Key-.> ::Zoom::Save&Close}
+# _ZOOM_     }
+# _ZOOM_     ::Zoom::DrawScale $T.left
+# _ZOOM_
+# _ZOOM_     destroy .sr_popup
+# _ZOOM_     menu .sr_popup -tearoff 0
+# _ZOOM_     .sr_popup add command -label "Add New Route Point" -underline 0 \
+# _ZOOM_         -command [list ::Zoom::RoutePoint add]
+# _ZOOM_     .sr_popup add command -label "Delete this Route Point" -underline 0 \
+# _ZOOM_         -command [list ::Zoom::RoutePoint delete]
+# _ZOOM_     .sr_popup add command -label "Split Road at Point" -underline 0 \
+# _ZOOM_         -command [list ::Zoom::RoutePoint "split"]
+# _ZOOM_     .sr_popup add separator
+# _ZOOM_     .sr_popup add command -label "Add Elevation" -underline 4 \
+# _ZOOM_         -command [list ::Zoom::RoutePoint elevation]
+# _ZOOM_     .sr_popup add command -label "Insert Waypoint" -underline 0 \
+# _ZOOM_         -command [list ::Zoom::RoutePoint insert]
+# _ZOOM_     .sr_popup add command -label "Create Arrow" -underline 0 \
+# _ZOOM_         -command [list ::Arrow::Dialog $::Zoom::W "" {0 0}]
+# _ZOOM_     .sr_popup add command -label "Google Maps" -underline 0 \
+# _ZOOM_         -command [list ::Zoom::RoutePoint google]
+# _ZOOM_     .sr_popup add separator
+# _ZOOM_     .sr_popup add command -label "Delete All Waypoints" -underline 7 \
+# _ZOOM_         -command [list ::Zoom::RoutePoint deleteall]
+# _ZOOM_     if {$::state(su)} {
+# _ZOOM_         .sr_popup add separator
+# _ZOOM_         set txt "Save [string totitle $::Zoom::ZMAP(what)] Data"
+# _ZOOM_         .sr_popup add command -label $txt -command ::Zoom::Save -underline 0
+# _ZOOM_     }
+# _ZOOM_     update
+# _ZOOM_ }
+# _ZOOM_ proc ::Zoom::Save&Close {} {
+# _ZOOM_     ::Zoom::USGSAllWaypoints
+# _ZOOM_     ::Zoom::Save
+# _ZOOM_     #::Zoom::Close
+# _ZOOM_     ::Save::SaveUserDataCmd 1
+# _ZOOM_     #puts "::Zoom::Save&Close: dist: $::Zoom::RINFO(dist) north: $::Zoom::RINFO(north) south: $::Zoom::RINFO(south)"
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::MakeRoadFrame -- draws the frame w/ road title, distance & climbing
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::MakeRoadFrame {parent} {
+# _ZOOM_     set PW $parent.road
+# _ZOOM_     ::my::labelframe $PW -text "Road Data"
+# _ZOOM_
+# _ZOOM_     set tw 8
+# _ZOOM_     set a [list -width $tw -justify center -state readonly]
+# _ZOOM_
+# _ZOOM_     ::my::label $PW.atitle -text "Data"
+# _ZOOM_     ::my::label $PW.etitle -text "Est."
+# _ZOOM_
+# _ZOOM_     ::my::entry $PW.title -textvariable ::Zoom::RINFO(title) -justify center
+# _ZOOM_     ::my::label $PW.ldist -text "Distance" -anchor w
+# _ZOOM_     ::my::entry $PW.edist -textvariable ::Zoom::RINFO(dist) -width $tw -justify center
+# _ZOOM_     eval ::my::entry $PW.gdist -textvariable ::Zoom::RINFO(guess,dist) $a
+# _ZOOM_     ::my::label $PW.lnorth -text "North climbing" -anchor w
+# _ZOOM_     ::my::entry $PW.enorth -textvariable ::Zoom::RINFO(north) -width $tw -justify center
+# _ZOOM_     eval ::my::entry $PW.gnorth -textvariable ::Zoom::RINFO(guess,north) $a
+# _ZOOM_     ::my::label $PW.lsouth -text "South climbing" -anchor w
+# _ZOOM_     ::my::entry $PW.esouth -textvariable ::Zoom::RINFO(south) -width $tw -justify center
+# _ZOOM_     eval ::my::entry $PW.gsouth -textvariable ::Zoom::RINFO(guess,south) $a
+# _ZOOM_
+# _ZOOM_     ::ttk::button $PW.save -text "Update" -command ::Zoom::Save
+# _ZOOM_     ::ttk::button $PW.usgs -image ::img::star -command ::Zoom::USGSAllWaypoints
+# _ZOOM_     bind $PW.usgs <Button-3> ::Zoom::Save&Close
+# _ZOOM_     ::Balloon::Create $PW.usgs static usgs "Query USGS for all waypoint elevation" ""
+# _ZOOM_
+# _ZOOM_     set ::Zoom::DS($PW,focus) $PW.edist
+# _ZOOM_
+# _ZOOM_     grid $PW.title - - -sticky ew -pady 5 -padx 5
+# _ZOOM_     grid $PW.ldist $PW.edist -sticky ew -padx 5 -row 2
+# _ZOOM_     grid $PW.lnorth $PW.enorth -sticky ew -padx 5
+# _ZOOM_     grid $PW.lsouth $PW.esouth -sticky ew -padx 5
+# _ZOOM_     if {1 || $::Zoom::ZMAP(guessable)} {
+# _ZOOM_         grid x $PW.atitle $PW.etitle -row 1
+# _ZOOM_         grid $PW.gdist  -row 2 -column 2 -sticky ew -padx {0 5}
+# _ZOOM_         grid $PW.gnorth -row 3 -column 2 -sticky ew -padx {0 5}
+# _ZOOM_         grid $PW.gsouth -row 4 -column 2 -sticky ew -padx {0 5}
+# _ZOOM_         grid $PW.usgs   -row 5 -column 2 -padx {0 5}
+# _ZOOM_     }
+# _ZOOM_     grid $PW.save - - -row 5 -pady 5
+# _ZOOM_     grid columnconfigure $PW 0 -weight 1
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::MakeNodeFrame -- draws the frame w/ node data
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::MakeNodeFrame {parent} {
+# _ZOOM_     set PW $parent.node
+# _ZOOM_     ::my::labelframe $PW -text "Node Data"
+# _ZOOM_
+# _ZOOM_     ::my::entry $PW.title -textvariable ::Zoom::RINFO(title) -justify center
+# _ZOOM_     ::my::label $PW.lele -text "Elevation" -anchor w
+# _ZOOM_     ::my::entry $PW.eele -textvariable ::Zoom::RINFO(ele) -width 20 -justify center
+# _ZOOM_     ::my::label $PW.luele -text "USGS Elevation" -anchor w
+# _ZOOM_     ::my::frame $PW.euele -borderwidth 2 -relief sunken
+# _ZOOM_     ::my::label $PW.euele.v -textvariable ::Zoom::RINFO(usgs) \
+# _ZOOM_         -background grey80 -anchor c \
+# _ZOOM_         -relief sunken -borderwidth 0 -justify center
+# _ZOOM_     ::ttk::button $PW.euele.star -image ::img::star -command ::Zoom::GoUSGS
+# _ZOOM_     pack $PW.euele.v -side left -fill both -expand 1
+# _ZOOM_     pack $PW.euele.star -side right
+# _ZOOM_
+# _ZOOM_     set txt "Query USGS for elevation"
+# _ZOOM_     ::Balloon::Create $PW.euele.star zoom usgs $txt $txt
+# _ZOOM_
+# _ZOOM_     # set fg [$PW.title cget -fg]
+# _ZOOM_     # foreach w [winfo child $PW] {
+# _ZOOM_     #   catch {$w config -disabledforeground $fg}
+# _ZOOM_     # }
+# _ZOOM_
+# _ZOOM_     ::ttk::button $PW.save -text Update -command ::Zoom::Save -state disabled
+# _ZOOM_     set ::Zoom::DS($PW,focus) $PW.eele
+# _ZOOM_
+# _ZOOM_     grid $PW.title - -sticky ew -pady 5 -padx 5
+# _ZOOM_     grid $PW.lele $PW.eele -sticky ew -padx 5
+# _ZOOM_     grid $PW.luele $PW.euele -sticky ew -padx 5
+# _ZOOM_     grid $PW.save - -pady 5
+# _ZOOM_     grid columnconfigure $PW 0 -weight 1
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::MakePOIFrame -- draws the frame w/ POI data
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::MakePOIFrame {parent} {
+# _ZOOM_     set PW $parent.poi
+# _ZOOM_     ::my::labelframe $PW -text "POI Data"
+# _ZOOM_
+# _ZOOM_     ::my::entry $PW.title -textvariable ::Zoom::RINFO(title) -justify center
+# _ZOOM_     ::my::entry $PW.desc -textvariable ::Zoom::RINFO(desc) -justify center
+# _ZOOM_
+# _ZOOM_     ::ttk::button $PW.save -text Update -state disabled -command ::Zoom::Save
+# _ZOOM_     set ::Zoom::DS($PW,focus) $PW.title
+# _ZOOM_
+# _ZOOM_     grid $PW.title - -sticky ew -pady 5 -padx 5
+# _ZOOM_     grid $PW.desc - -sticky ew -pady 5 -padx 5
+# _ZOOM_     grid $PW.save - -pady 5
+# _ZOOM_     grid columnconfigure $PW 0 -weight 1
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::MakeGEOFrame -- draws the frame w/ GEO data
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::MakeGEOFrame {parent} {
+# _ZOOM_     set PW $parent.geo
+# _ZOOM_     ::my::labelframe $PW -text "Geocaching Data"
+# _ZOOM_
+# _ZOOM_     ::my::entry $PW.title -textvariable ::Zoom::RINFO(title) -justify center
+# _ZOOM_
+# _ZOOM_     ::ttk::button $PW.save -text Update -state disabled -command ::Zoom::Save
+# _ZOOM_     set ::Zoom::DS($PW,focus) $PW.title
+# _ZOOM_
+# _ZOOM_     grid $PW.title - -sticky ew -pady 5 -padx 5
+# _ZOOM_     grid $PW.save - -pady 5
+# _ZOOM_     grid columnconfigure $PW 0 -weight 1
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::MakeRouteFrame -- draws the frame w/ track info
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::MakeRouteFrame {parent {what route}} {
+# _ZOOM_     set PW $parent.$what
+# _ZOOM_     ::my::labelframe $PW -text "[string totitle $what] Data"
+# _ZOOM_
+# _ZOOM_     ::my::entry $PW.title -textvariable ::Zoom::RINFO(title) -justify center
+# _ZOOM_     ::my::label $PW.ldist -text "Distance" -anchor w
+# _ZOOM_     ::my::entry $PW.edist -textvariable ::Zoom::RINFO(dist) -width 10 -justify center
+# _ZOOM_     ::my::label $PW.lclimb -text "Climbing" -anchor w
+# _ZOOM_     ::my::entry $PW.eclimb -textvariable ::Zoom::RINFO(climb) -width 10 -justify center
+# _ZOOM_     ::my::label $PW.ldesc -text "Descending" -anchor w
+# _ZOOM_     ::my::entry $PW.edesc -textvariable ::Zoom::RINFO(desc) -width 10 -justify center
+# _ZOOM_     set ::Zoom::DS($PW,focus) $PW.edist
+# _ZOOM_
+# _ZOOM_     ::ttk::button $PW.save -text "Update" -command ::Zoom::Save
+# _ZOOM_
+# _ZOOM_     grid $PW.title - -sticky ew -pady 5 -padx 5
+# _ZOOM_     grid $PW.ldist $PW.edist -sticky ew -padx 5
+# _ZOOM_     grid $PW.lclimb $PW.eclimb -sticky ew -padx 5
+# _ZOOM_     grid $PW.ldesc $PW.edesc -sticky ew -padx 5
+# _ZOOM_     #grid $PW.save - -pady 5
+# _ZOOM_     grid columnconfigure $PW 0 -weight 1
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::MakeCoordsFrame -- draws the frame w/ user coordinates
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::MakeCoordsFrame {parent} {
+# _ZOOM_     set PW $parent.coords
+# _ZOOM_     ::my::labelframe $PW -text "Coordinate Data"
+# _ZOOM_
+# _ZOOM_     ::my::entry $PW.title -textvariable ::Zoom::RINFO(title) -justify center
+# _ZOOM_     ::my::label $PW.llat -text "Latitude:"  -anchor w
+# _ZOOM_     ::my::entry $PW.lat -textvariable ::Zoom::RINFO(lat) -justify center
+# _ZOOM_     ::my::label $PW.llon -text "Longitude:" -anchor w
+# _ZOOM_     ::my::entry $PW.lon -textvariable ::Zoom::RINFO(lon) -justify center
+# _ZOOM_
+# _ZOOM_     ::ttk::button $PW.save -text Update -state disabled -command ::Zoom::Save
+# _ZOOM_     set ::Zoom::DS($PW,focus) $PW.title
+# _ZOOM_
+# _ZOOM_     grid $PW.title - -sticky ew -pady 5 -padx 5
+# _ZOOM_     grid $PW.llat $PW.lat -sticky ew -padx 5
+# _ZOOM_     grid $PW.llon $PW.lon -sticky ew -padx 5
+# _ZOOM_     grid columnconfigure $PW 0 -weight 1
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::DisplayReadOnly -- updates display for readonly mode
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::DisplayReadOnly {} {
+# _ZOOM_     set w ${::Zoom::T}.data
+# _ZOOM_     set how [expr {$::Zoom::ZMAP(readonly) ? "disabled" : "normal"}]
+# _ZOOM_     set how [expr {$::Zoom::ZMAP(readonly) ? "readonly" : "normal"}]
+# _ZOOM_     ::Zoom::DisplayReadOnly2 $w $how
+# _ZOOM_ }
+# _ZOOM_ proc ::Zoom::DisplayReadOnly2 {WW how} {
+# _ZOOM_     foreach w [winfo children $WW] {
+# _ZOOM_         if {[string match "*data.road.g*" $w]} continue
+# _ZOOM_         catch {$w config -state $how}
+# _ZOOM_         ::Zoom::DisplayReadOnly2 $w $how
+# _ZOOM_     }
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GoUSGS -- initiates querying USGS for elevation of a node
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GoUSGS {} {
+# _ZOOM_     variable RINFO
+# _ZOOM_
+# _ZOOM_     set utm [lindex $RINFO(pts) 0 6]
+# _ZOOM_     foreach {lat lon} [eval ::Data::utm2ll $utm] break
+# _ZOOM_     set latlon [concat [int2lat $lat] [int2lat $lon]]
+# _ZOOM_     set usgs [::USGS::Dialog $::Zoom::T $latlon]
+# _ZOOM_
+# _ZOOM_     # First convert to external units
+# _ZOOM_     set usgs [::Data::Convert $usgs climb]
+# _ZOOM_     if {! [string is double -strict $usgs]} {
+# _ZOOM_         set RINFO(usgs) $usgs
+# _ZOOM_         return
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     set RINFO(usgs) [::Data::Label $usgs climb 3]
+# _ZOOM_     if {$::Zoom::ZMAP(readonly)} return
+# _ZOOM_     if {[string is double -strict $RINFO(ele)]} return
+# _ZOOM_     set RINFO(ele) $usgs
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::DrawScale -- creates our zoom buttons
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::DrawScale {WW} {
+# _ZOOM_     variable STATIC
+# _ZOOM_
+# _ZOOM_     if {[lsearch [image names] ::img::plus] == -1} {
+# _ZOOM_         image create bitmap ::img::plus -foreground white -background darkblue \
+# _ZOOM_             -data {
+# _ZOOM_                 #define plus_width 20
+# _ZOOM_                 #define plus_height 20
+# _ZOOM_                 static char plus_bits = {
+# _ZOOM_                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x3f, 0x00, 0xe0,
+# _ZOOM_                     0x7f, 0x00, 0x70, 0xe0, 0x00, 0x38, 0xc0, 0x00, 0x18, 0x86,
+# _ZOOM_                     0x01, 0x1c, 0x86, 0x03, 0x0c, 0x06, 0x03, 0xcc, 0x3f, 0x03,
+# _ZOOM_                     0xcc, 0x3f, 0x03, 0x0c, 0x06, 0x03, 0x1c, 0x86, 0x03, 0x18,
+# _ZOOM_                     0x86, 0x01, 0x38, 0xc0, 0x01, 0x70, 0xe0, 0x00, 0xe0, 0x7f,
+# _ZOOM_                     0x00, 0xc0, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+# _ZOOM_             } -maskdata {
+# _ZOOM_                 #define mask_width 20
+# _ZOOM_                 #define mask_height 20
+# _ZOOM_                 static char mask_bits = {
+# _ZOOM_                     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+# _ZOOM_                     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+# _ZOOM_                     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+# _ZOOM_                     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+# _ZOOM_                     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+# _ZOOM_                     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+# _ZOOM_             }
+# _ZOOM_         image create bitmap ::img::minus -foreground white \
+# _ZOOM_             -background darkblue -data {
+# _ZOOM_                 #define minus_width 20
+# _ZOOM_                 #define minus_height 20
+# _ZOOM_                 static char minus_bits = {
+# _ZOOM_                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x3f, 0x00, 0xe0,
+# _ZOOM_                     0x7f, 0x00, 0x70, 0xe0, 0x00, 0x38, 0xc0, 0x00, 0x18, 0x80,
+# _ZOOM_                     0x01, 0x1c, 0x80, 0x03, 0x0c, 0x00, 0x03, 0xcc, 0x3f, 0x03,
+# _ZOOM_                     0xcc, 0x3f, 0x03, 0x0c, 0x00, 0x03, 0x1c, 0x80, 0x03, 0x18,
+# _ZOOM_                     0x80, 0x01, 0x38, 0xc0, 0x01, 0x70, 0xe0, 0x00, 0xe0, 0x7f,
+# _ZOOM_                     0x00, 0xc0, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+# _ZOOM_             } -maskdata {
+# _ZOOM_                 #define mask_width 20
+# _ZOOM_                 #define mask_height 20
+# _ZOOM_                 static char mask_bits = {
+# _ZOOM_                     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+# _ZOOM_                     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+# _ZOOM_                     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+# _ZOOM_                     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+# _ZOOM_                     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+# _ZOOM_                     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+# _ZOOM_             }
+# _ZOOM_         image create photo ::img::button -width 18 -height 6
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     ::tk::label $WW.zin -text "Zoom\nIn" -font {{MS Sans Serif} 6 bold} -bg beige \
+# _ZOOM_         -activebackground darkblue
+# _ZOOM_     grid $WW.zin -row 1 -sticky s
+# _ZOOM_     ::tk::button $WW.bp -image ::img::plus -bg darkblue -takefocus 0 \
+# _ZOOM_         -activebackground darkblue -command {::Zoom::NewMag -1}
+# _ZOOM_     ::Balloon::Create $WW.bp zoom plus "Zoom in by 2x" ""
+# _ZOOM_     grid  $WW.bp -pady 2 -row 2
+# _ZOOM_     for {set i -2} {$i < 10} {incr i} {
+# _ZOOM_         ::tk::radiobutton $WW.b$i \
+# _ZOOM_             -bg lightblue \
+# _ZOOM_             -image ::img::button \
+# _ZOOM_             -command [list ::Zoom::NewMag 0] \
+# _ZOOM_             -overrelief groove \
+# _ZOOM_             -variable ::Zoom::DS(mag) \
+# _ZOOM_             -value $i \
+# _ZOOM_             -activebackground darkblue \
+# _ZOOM_             -indicatoron 0 \
+# _ZOOM_             -takefocus 0 \
+# _ZOOM_             -selectcolor darkblue
+# _ZOOM_         set bmsg [lindex $STATIC(mags) [expr {$i+2}]]
+# _ZOOM_         ::Balloon::Create $WW.b$i zoom b$i "Zoom $bmsg" ""
+# _ZOOM_         grid $WW.b$i -pady 2 -row [expr {$i+3+2}]
+# _ZOOM_         if {$i <= 0} {
+# _ZOOM_             canvas $WW.b${i}_cover -bd 0 -highlightthickness 0 -bg beige
+# _ZOOM_             place $WW.b${i}_cover -in $WW.b$i -bordermode outside -x 0 -y 0 \
+# _ZOOM_                 -relheight 1 -relwidth 1
+# _ZOOM_         }
+# _ZOOM_     }
+# _ZOOM_     ::tk::button $WW.bm -image ::img::minus -bg darkblue \
+# _ZOOM_         -activebackground darkblue -takefocus 0 -command {::Zoom::NewMag 1}
+# _ZOOM_     grid $WW.bm -pady 2
+# _ZOOM_     ::Balloon::Create $WW.bm zoom minus "Zoom out by 2x" ""
+# _ZOOM_     ::tk::label $WW.zout -text "Zoom\nOut" -font [$WW.zin cget -font] -bg beige \
+# _ZOOM_         -activebackground darkblue
+# _ZOOM_     grid $WW.zout -pady {0 20}
+# _ZOOM_
+# _ZOOM_     foreach w {topo aerial urban} \
+# _ZOOM_         msg {{View topo map} {View aerial photograph} \
+# _ZOOM_                  "View urban photograph\n(not available everywhere)"} {
+# _ZOOM_         ::tk::radiobutton $WW.$w -text [string totitle $w] \
+# _ZOOM_             -command ::Zoom::NewTheme \
+# _ZOOM_             -font [$WW.zin cget -font] \
+# _ZOOM_             -indicatoron 0 \
+# _ZOOM_             -relief raised \
+# _ZOOM_             -activeforeground white \
+# _ZOOM_             -activebackground darkblue \
+# _ZOOM_             -selectcolor darkblue \
+# _ZOOM_             -fg white \
+# _ZOOM_             -bg lightblue \
+# _ZOOM_             -takefocus 0 \
+# _ZOOM_             -variable ::Zoom::DS(theme) \
+# _ZOOM_             -value $w
+# _ZOOM_         ::Balloon::Create $WW.$w zoom $w $msg ""
+# _ZOOM_         grid $WW.$w -pady 2 -sticky ew -padx 5
+# _ZOOM_     }
+# _ZOOM_     ::Zoom::NewTheme
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::SwapNodeRoad -- swaps the node info and the road info frames
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::SwapNodeRoad {what} {
+# _ZOOM_     set parent ${::Zoom::T}.data
+# _ZOOM_     set w [pack slaves $parent]                 ;# Who is there now
+# _ZOOM_     set w2 "$parent.$what"                      ;# Who should be there
+# _ZOOM_     focus $::Zoom::DS($w2,focus)
+# _ZOOM_     catch {$::Zoom::DS($w2,focus) icursor end}
+# _ZOOM_
+# _ZOOM_     if {$w eq $w2} return
+# _ZOOM_     pack forget $w
+# _ZOOM_
+# _ZOOM_     if {[winfo exists $w2]} {
+# _ZOOM_         pack $w2 -side top -fill both -expand 1
+# _ZOOM_     }
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::StartMapFetch -- puts all cells into appropriate queues
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::StartMapFetch {} {
+# _ZOOM_     variable ZMAP
+# _ZOOM_     variable FETCH
+# _ZOOM_
+# _ZOOM_     array unset FETCH
+# _ZOOM_     set FETCH(q,visible) [set FETCH(q,core) [set FETCH(q,all) {}]]
+# _ZOOM_     set FETCH(aid) ""
+# _ZOOM_
+# _ZOOM_     foreach cell $ZMAP(cells) {
+# _ZOOM_         foreach {XX YY} $cell break
+# _ZOOM_         set FETCH(status,$XX,$YY) 0             ;# Mark as not fetched
+# _ZOOM_
+# _ZOOM_         if {[::Zoom::IsCellVisible $XX $YY]} {
+# _ZOOM_             lappend FETCH(q,visible) $cell
+# _ZOOM_         }
+# _ZOOM_         if {[lsearch $ZMAP(core) $cell] > -1} {
+# _ZOOM_             lappend FETCH(q,core) $cell
+# _ZOOM_         }
+# _ZOOM_         lappend FETCH(q,all) $cell
+# _ZOOM_     }
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::Expose -- called when window scrolls, sets up after event to handle it
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::Expose {} {
+# _ZOOM_     variable FETCH
+# _ZOOM_
+# _ZOOM_     after cancel $FETCH(aid)
+# _ZOOM_     set FETCH(aid) [after 200 ::Zoom::_Expose]
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::_Expose -- called when window scrolls, updates visible queue
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::_Expose {} {
+# _ZOOM_     variable FETCH
+# _ZOOM_     variable ZMAP
+# _ZOOM_
+# _ZOOM_     if {! $ZMAP(ready)} {                       ;# For BIG zooms, this gets
+# _ZOOM_         ::Zoom::Expose                          ;# called too early
+# _ZOOM_         return
+# _ZOOM_     }
+# _ZOOM_     set new {}
+# _ZOOM_     foreach cell $FETCH(q,all) {
+# _ZOOM_         foreach {XX YY} $cell break
+# _ZOOM_         if {$FETCH(status,$XX,$YY) != 0} continue ;# Already being fetched
+# _ZOOM_         if {! [::Zoom::IsCellVisible $XX $YY]} continue ;# Off screen
+# _ZOOM_         lappend new $cell
+# _ZOOM_     }
+# _ZOOM_     set FETCH(q,visible) $new
+# _ZOOM_     if {$new ne {}} {after idle ::Zoom::RunAllQueues}
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::IsCellVisible -- return true if any part of a cell block is visible
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::IsCellVisible {XX YY} {
+# _ZOOM_     variable SCREEN
+# _ZOOM_     foreach {cl ct cr cb} [::Zoom::CellBox $XX $YY] break
+# _ZOOM_
+# _ZOOM_     if {$ct >= $SCREEN(b) || $cb <= $SCREEN(t) \
+# _ZOOM_             || $cr <= $SCREEN(l) || $cl >= $SCREEN(r)} { return 0}
+# _ZOOM_     return 1
+# _ZOOM_ }
+# _ZOOM_ proc ::Zoom::DistanceFromVisible {XX YY} {
+# _ZOOM_     variable SCREEN
+# _ZOOM_     foreach {cl ct cr cb} [::Zoom::CellBox $XX $YY] break
+# _ZOOM_
+# _ZOOM_     set dist 0
+# _ZOOM_     if {$cl >= $SCREEN(r)} { set dist [expr {$dist + ($cr - $SCREEN(r))}] }
+# _ZOOM_     if {$cr <= $SCREEN(l)} { set dist [expr {$dist - ($cl - $SCREEN(l))}] }
+# _ZOOM_     if {$ct >= $SCREEN(b)} { set dist [expr {$dist + ($cb - $SCREEN(b))}] }
+# _ZOOM_     if {$cb <= $SCREEN(t)} { set dist [expr {$dist - ($ct - $SCREEN(t))}] }
+# _ZOOM_
+# _ZOOM_     return $dist
+# _ZOOM_ }
+# _ZOOM_ proc ::Zoom::bar {} {
+# _ZOOM_     foreach {t l b r} $::Zoom::ZMAP(bbox) break
+# _ZOOM_     for {set row $t} {$row >= $b} {incr row -1} {
+# _ZOOM_         set dr [expr {$t - $row}]
+# _ZOOM_         for {set col $l} {$col <= $r} {incr col} {
+# _ZOOM_             set dc [expr {$col - $l}]
+# _ZOOM_             set viz [::Zoom::IsCellVisible $col $row]
+# _ZOOM_             set dist [::Zoom::DistanceFromVisible $col $row]
+# _ZOOM_             set dist [format "%3d" $dist]
+# _ZOOM_             puts -nonewline "($dr,$dc) $viz,$dist  "
+# _ZOOM_         }
+# _ZOOM_         puts ""
+# _ZOOM_     }
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetFilename -- returns name of where to store the map file
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetFilename {XX YY} {
+# _ZOOM_     variable STATIC
+# _ZOOM_     variable ZMAP
+# _ZOOM_
+# _ZOOM_     set fname "${XX}_${YY}_$ZMAP(zone).jpg"
+# _ZOOM_     set dirname [file join $STATIC(cache) $ZMAP(theme) $ZMAP(mag) $XX]
+# _ZOOM_     if {! [file isdirectory $dirname]} {
+# _ZOOM_         file mkdir $dirname
+# _ZOOM_         if {! [file isdirectory $dirname]} {
+# _ZOOM_             WARN "Can't create directory '$dirname'"
+# _ZOOM_             set ZMAP(nofetch) 1
+# _ZOOM_             return ""
+# _ZOOM_         }
+# _ZOOM_     }
+# _ZOOM_     set fname [file join $dirname $fname]
+# _ZOOM_     return $fname
+# _ZOOM_ }
+# _ZOOM_ proc ::Zoom::GetIName {XX YY} {
+# _ZOOM_     set fname [::Zoom::GetFilename $XX $YY]
+# _ZOOM_     set iname "::zoom::[file rootname [file tail $fname]]"
+# _ZOOM_     return $iname
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetURL -- return the url needed to fetch a particular map
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetURL {XX YY} {
+# _ZOOM_     variable STATIC
+# _ZOOM_     variable ZMAP
+# _ZOOM_
+# _ZOOM_     set arg "T=$STATIC(rtheme,$ZMAP(theme))&S=$ZMAP(mag)&X=$XX&y=$YY"
+# _ZOOM_     append arg "&Z=$ZMAP(zone)"
+# _ZOOM_     set url "$STATIC(url2)?$arg"
+# _ZOOM_     return $url
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::doneCmd -- callback routine that is called when a map page arrives
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::doneCmd {token cookie} {
+# _ZOOM_     if {[::http::status $token] ne "ok"} return ;# Some kind of failure
+# _ZOOM_
+# _ZOOM_     foreach {sid fname XX YY} $cookie break
+# _ZOOM_     if {$sid != $::Zoom::ZMAP(sid)} return      ;# Wrong session
+# _ZOOM_
+# _ZOOM_     # Check for valid image: could be error message
+# _ZOOM_
+# _ZOOM_     # Save image off to a file
+# _ZOOM_     set fout [open $fname w]
+# _ZOOM_     fconfigure $fout -translation binary
+# _ZOOM_     puts -nonewline $fout [::http::data $token]
+# _ZOOM_     close $fout
+# _ZOOM_
+# _ZOOM_     after idle ::Zoom::PutImage $XX $YY [list $fname] web
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::PutImage -- displays a image in a file at a given location
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::PutImage {XX YY fname whence} {
+# _ZOOM_     variable W
+# _ZOOM_     variable ZMAP
+# _ZOOM_     variable FETCH
+# _ZOOM_     variable stats
+# _ZOOM_
+# _ZOOM_     if {! [winfo exists $W]} return
+# _ZOOM_     # perhaps skip rendering of non-visible, non-core cells
+# _ZOOM_
+# _ZOOM_     if {! [::Zoom::Ok2Render $XX $YY]} {        ;# DON'T DISPLAY IT!!!
+# _ZOOM_         set FETCH(status,$XX,$YY) 0             ;# Mark as unqueued
+# _ZOOM_         ::Zoom::Status $XX $YY discarded
+# _ZOOM_         return
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     set FETCH(status,$XX,$YY) 2                 ;# Mark as drawn
+# _ZOOM_     ::Zoom::Status $XX $YY $whence
+# _ZOOM_     incr stats(rendered)
+# _ZOOM_     lappend ZMAP(rendered) [list $XX $YY]
+# _ZOOM_
+# _ZOOM_     set iname [::Zoom::GetIName $XX $YY]
+# _ZOOM_     if {[lsearch [image names] $iname] == -1} {
+# _ZOOM_         set n [catch {image create photo $iname -file $fname}]
+# _ZOOM_         if {$n} {
+# _ZOOM_             set fname2 ${fname}.bad
+# _ZOOM_             file rename -force $fname $fname2
+# _ZOOM_             INFO "Bad image file $fname2"
+# _ZOOM_             set FETCH(status,$XX,$YY) 0         ;# Mark as unqueued
+# _ZOOM_             ::Zoom::Status $XX $YY discarded
+# _ZOOM_             return
+# _ZOOM_         }
+# _ZOOM_     }
+# _ZOOM_     foreach {x y} [::Zoom::Chunk2canvas $XX $YY] break
+# _ZOOM_     $W create image $x $y -image $iname -tag [list img img_$XX,$YY] -anchor sw
+# _ZOOM_     $W raise road
+# _ZOOM_     $W raise node
+# _ZOOM_     $W raise geo
+# _ZOOM_     $W raise rtept
+# _ZOOM_     $W raise trackpoint
+# _ZOOM_     if {$ZMAP(mag) > 13} { $W lower rtept }
+# _ZOOM_     $W raise milepost
+# _ZOOM_     $W raise arrow
+# _ZOOM_     $W raise BOX ; $W lower dash
+# _ZOOM_     update idletasks
+# _ZOOM_ }
+# _ZOOM_ proc ::Zoom::MakeGrayscale {img} {
+# _ZOOM_     set w [image width $img]
+# _ZOOM_     set h [image height $img]
+# _ZOOM_     image create photo ::zoom::tmp -width $w -height $h
+# _ZOOM_     ::zoom::tmp config -data [$img data -format jpeg -grayscale]
+# _ZOOM_     $img blank
+# _ZOOM_     $img copy ::zoom::tmp
+# _ZOOM_     image delete ::zoom::tmp
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::Ok2Render -- determines if it is okay to render this cell.
+# _ZOOM_ # If we're over the max allowed, then skip if not visible or else
+# _ZOOM_ # kick out some other non-visible cell
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::Ok2Render {XX YY} {
+# _ZOOM_     variable W
+# _ZOOM_     variable ZMAP
+# _ZOOM_     variable STATIC
+# _ZOOM_     variable FETCH
+# _ZOOM_
+# _ZOOM_     set n [llength $ZMAP(rendered)]
+# _ZOOM_     #if {$n < $STATIC(maxRendered)} { puts "$XX,$YY: enough room $n" }
+# _ZOOM_     if {$n < $STATIC(maxRendered)} { return 1 } ;# Enough room
+# _ZOOM_     #if {! [::Zoom::IsCellVisible $XX $YY]} { puts "$XX,$YY: offscreen" }
+# _ZOOM_     if {! [::Zoom::IsCellVisible $XX $YY]} { return 0 } ;# Offscreen, ignore
+# _ZOOM_
+# _ZOOM_     set idx [::Zoom::FindFurthestAway]
+# _ZOOM_     foreach {xx yy} [lindex $ZMAP(rendered) $idx] break
+# _ZOOM_     set ZMAP(rendered) [lreplace $ZMAP(rendered) $idx $idx]
+# _ZOOM_     set iname [::Zoom::GetIName $xx $yy]
+# _ZOOM_     $W delete img_$xx,$yy
+# _ZOOM_     image delete $iname
+# _ZOOM_     set FETCH(status,$xx,$yy) 0                 ;# Mark as unqueued
+# _ZOOM_     ::Zoom::Status $xx $yy discarded
+# _ZOOM_
+# _ZOOM_     #puts "$XX,$YY: kicking out $xx,$yy => $::Zoom::FETCH(status,$xx,$yy)"
+# _ZOOM_
+# _ZOOM_     return 1
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::FindFurthestAway -- returns rendered cell furthest
+# _ZOOM_ # away from the visible area. Uses cartesian distance from
+# _ZOOM_ # visible area; better(?) would be linear from core.
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::FindFurthestAway {} {
+# _ZOOM_     variable ZMAP
+# _ZOOM_
+# _ZOOM_     set worst 0
+# _ZOOM_     set dist 0
+# _ZOOM_     set idx -1
+# _ZOOM_     foreach cell $ZMAP(rendered) {
+# _ZOOM_         incr idx
+# _ZOOM_         set d [eval ::Zoom::DistanceFromVisible $cell]
+# _ZOOM_         if {$d > $dist} {
+# _ZOOM_             set dist $d
+# _ZOOM_             set worst $idx
+# _ZOOM_         }
+# _ZOOM_     }
+# _ZOOM_     return $worst
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # Status -- displays status of a cell and its fetching state
+# _ZOOM_ # PGS how: queued pending cancel timeout failure done
+# _ZOOM_ # zoom how: cache web
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::Status {XX YY how} {
+# _ZOOM_     variable W
+# _ZOOM_     variable W2
+# _ZOOM_     variable stats
+# _ZOOM_     variable COLORS
+# _ZOOM_
+# _ZOOM_     if {! [winfo exists $W]} return
+# _ZOOM_     $W itemconfig cell$XX,$YY -fill $COLORS($how)
+# _ZOOM_     $W2 itemconfig cell$XX,$YY -fill $COLORS($how)
+# _ZOOM_
+# _ZOOM_     if {$how eq "queued"} {
+# _ZOOM_         incr stats(queued)
+# _ZOOM_     } elseif {$how eq "pending"} {
+# _ZOOM_         incr stats(queued) -1
+# _ZOOM_         incr stats(loading)
+# _ZOOM_     } elseif {$how eq "done"} {
+# _ZOOM_         incr stats(loading) -1
+# _ZOOM_         incr stats(retrieved)
+# _ZOOM_     } elseif {$how eq "failure" || $how eq "cancel"} {
+# _ZOOM_         incr stats(loading) -1
+# _ZOOM_     }
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::statusCmd -- status callback for Parallel Get URL package
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::statusCmd {id how cookie} {
+# _ZOOM_     foreach {sid . XX YY} $cookie break
+# _ZOOM_     if {$sid != $::Zoom::ZMAP(sid)} return
+# _ZOOM_     ::Zoom::Status $XX $YY $how
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::GetOneMap -- does the work to make one map appear
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::GetOneMap {XX YY} {
+# _ZOOM_     variable ZMAP
+# _ZOOM_     variable FETCH
+# _ZOOM_
+# _ZOOM_     set fname [::Zoom::GetFilename $XX $YY]
+# _ZOOM_     if {$fname eq ""} return
+# _ZOOM_
+# _ZOOM_     if {! $ZMAP(nocache) && [file exists $fname]} { ;# Is it in the cache?
+# _ZOOM_         ::Zoom::PutImage $XX $YY $fname cache
+# _ZOOM_     } else {
+# _ZOOM_         if {$ZMAP(nofetch)} return
+# _ZOOM_         set url [::Zoom::GetURL $XX $YY]
+# _ZOOM_         set cookie [list $ZMAP(sid) $fname $XX $YY]
+# _ZOOM_         ::PGU::Add $url $cookie ::Zoom::doneCmd ::Zoom::statusCmd
+# _ZOOM_         set FETCH(status,$XX,$YY) 1
+# _ZOOM_     }
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::RunOneQueue -- gets all the maps in a given queue
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::RunOneQueue {which max} {
+# _ZOOM_     variable FETCH
+# _ZOOM_
+# _ZOOM_     set cnt 0
+# _ZOOM_     foreach cell $FETCH(q,$which) {
+# _ZOOM_         if {$cnt >= $max} break
+# _ZOOM_         foreach {XX YY} $cell break
+# _ZOOM_         if {$FETCH(status,$XX,$YY) != 0} continue
+# _ZOOM_         ::Zoom::GetOneMap $XX $YY
+# _ZOOM_         incr cnt
+# _ZOOM_     }
+# _ZOOM_     set FETCH(q,$which) [lrange $FETCH(q,$which) $cnt end]
+# _ZOOM_     return $cnt
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::RunAllQueues -- empties the visible and/or core queues
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::RunAllQueues {} {
+# _ZOOM_     variable FETCH
+# _ZOOM_     variable STATIC
+# _ZOOM_
+# _ZOOM_     set qlen [lindex [::PGU::Statistics] 0]
+# _ZOOM_     set n [expr {$STATIC(maxFetch) - $qlen}]
+# _ZOOM_
+# _ZOOM_     set cnt [::Zoom::RunOneQueue visible $n]
+# _ZOOM_     incr cnt [::Zoom::RunOneQueue core [expr {$n - $cnt}]]
+# _ZOOM_     after idle ::PGU::Launch
+# _ZOOM_     return $cnt
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::canvas2utm -- converts from canvas into utm coordinates
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::canvas2utm {x y} {
+# _ZOOM_     variable ZMAP
+# _ZOOM_
+# _ZOOM_     set mult [expr {int(100 * pow(2,$ZMAP(mag)-9))}]
+# _ZOOM_
+# _ZOOM_     set eX [expr {$x / 200.0 + $ZMAP(o,x)}]
+# _ZOOM_     set eY [expr {$ZMAP(o,y) - $y / 200.0}]
+# _ZOOM_     set north [expr {$eY * $mult}]
+# _ZOOM_     set east [expr {$eX * $mult}]
+# _ZOOM_     set zone $ZMAP(zone)
+# _ZOOM_
+# _ZOOM_     return [list $north $east $zone]
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::DoPopupMenu -- puts up the right-click popup menu
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::DoPopupMenu {x y what {who ""}} {
+# _ZOOM_     variable W
+# _ZOOM_     variable DS
+# _ZOOM_     variable ZMAP
+# _ZOOM_
+# _ZOOM_     set DS(popup,cxy) [list [$W canvasx $x] [$W canvasy $y]]
+# _ZOOM_     set DS(popup,what) $what
+# _ZOOM_     set DS(popup,who) $who
+# _ZOOM_
+# _ZOOM_     # Short circuit shortcuts
+# _ZOOM_     if {$what eq "add" || $what eq "delete"} {
+# _ZOOM_         ::Zoom::RoutePoint $what
+# _ZOOM_         return
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     # 0 = new route point
+# _ZOOM_     # 1 = delete
+# _ZOOM_     # 2 = split
+# _ZOOM_     # 3
+# _ZOOM_     # 4 = elevation
+# _ZOOM_     # 5 = insert waypoint
+# _ZOOM_     # 6 = arrow
+# _ZOOM_     # 7 = google
+# _ZOOM_     # 8
+# _ZOOM_     # 9 = delete all
+# _ZOOM_     # 10
+# _ZOOM_     # 11 = save
+# _ZOOM_
+# _ZOOM_     set isRtept [expr {$what eq "rtept"}]
+# _ZOOM_     set notRtept [expr {$what ne "rtept"}]
+# _ZOOM_     set isMap [expr {$what eq "map"}]
+# _ZOOM_     set ss(0) disabled ; set ss(1) normal
+# _ZOOM_
+# _ZOOM_     .sr_popup entryconfig 0 -state $ss($notRtept)
+# _ZOOM_     .sr_popup entryconfig 1 -state $ss($isRtept)
+# _ZOOM_     .sr_popup entryconfig 2 -state $ss($notRtept)
+# _ZOOM_     .sr_popup entryconfig 4 -state $ss($isRtept)
+# _ZOOM_     .sr_popup entryconfig 5 -state $ss($notRtept)
+# _ZOOM_     if {$what eq "arrow"} {
+# _ZOOM_         .sr_popup entryconfig 6 -label "Update Arrow" -state normal \
+# _ZOOM_             -command [list ::Arrow::Dialog $Zoom::W $who]
+# _ZOOM_     } else {
+# _ZOOM_         .sr_popup entryconfig 6 -label "Create Arrow" -state $ss($isMap) \
+# _ZOOM_             -command [list ::Arrow::Dialog $::Zoom::W "" $DS(popup,cxy)]
+# _ZOOM_     }
+# _ZOOM_     .sr_popup entryconfig 7 -state normal
+# _ZOOM_     .sr_popup entryconfig 9 -state normal
+# _ZOOM_
+# _ZOOM_     if {$ZMAP(readonly)} {
+# _ZOOM_         .sr_popup entryconfig 0 -state disabled
+# _ZOOM_         .sr_popup entryconfig 1 -state disabled
+# _ZOOM_         .sr_popup entryconfig 4 -state disabled
+# _ZOOM_         .sr_popup entryconfig 5 -state disabled
+# _ZOOM_         .sr_popup entryconfig 9 -state disabled
+# _ZOOM_     }
+# _ZOOM_     tk_popup .sr_popup [winfo pointerx $W] [winfo pointery $W] \
+# _ZOOM_         [expr {$what eq "road" ? 0 : ""}]
+# _ZOOM_ }
+# _ZOOM_ proc ::Zoom::old___DoPopupMenu {x y what {who ""}} {
+# _ZOOM_     variable W
+# _ZOOM_     variable DS
+# _ZOOM_
+# _ZOOM_     set DS(popup,cxy) [list [$W canvasx $x] [$W canvasy $y]]
+# _ZOOM_     set DS(popup,what) $what
+# _ZOOM_     set DS(popup,who) $who
+# _ZOOM_     if {$what eq "go"} {
+# _ZOOM_         ::Zoom::RoutePoint add
+# _ZOOM_         return
+# _ZOOM_     }
+# _ZOOM_     if {$what eq "delete"} {
+# _ZOOM_         ::Zoom::RoutePoint delete
+# _ZOOM_         return
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     set ss(0) disabled ; set ss(1) normal
+# _ZOOM_     if {$::Zoom::ZMAP(readonly)} { set ss(1) $ss(0)}
+# _ZOOM_     .sr_popup entryconfig 0 -state $ss([string equal "road"  $what])
+# _ZOOM_     .sr_popup entryconfig 1 -state $ss([string equal "rtept" $what])
+# _ZOOM_     .sr_popup entryconfig 3 -state $ss([string equal "rtept" $what])
+# _ZOOM_
+# _ZOOM_     tk_popup .sr_popup [winfo pointerx $W] [winfo pointery $W] \
+# _ZOOM_         [expr {$what eq "road" ? 0 : ""}]
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # RoutePoint -- handles adding or deleting route points
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::RoutePoint {what} {
+# _ZOOM_     variable RINFO
+# _ZOOM_     variable DS
+# _ZOOM_
+# _ZOOM_     if {$what eq "delete"} {
+# _ZOOM_         set RINFO(pts) [lreplace $RINFO(pts) $DS(popup,who) $DS(popup,who)]
+# _ZOOM_         ::Zoom::IsModified 1
+# _ZOOM_         ::Zoom::DrawPoints
+# _ZOOM_         ::Zoom::GuessDistance
+# _ZOOM_         ::Zoom::GuessClimbing
+# _ZOOM_     } elseif {$what eq "add" || $what eq "insert"} {
+# _ZOOM_         foreach {idx seg} [::Zoom::FindSplit] break
+# _ZOOM_         if {$what eq "insert"} {
+# _ZOOM_             set xy [eval ::Data::NearestPointOnLine $DS(popup,cxy) $seg]
+# _ZOOM_             set utm [eval ::Zoom::canvas2utm $xy]
+# _ZOOM_         } else {
+# _ZOOM_             set utm [eval ::Zoom::canvas2utm $DS(popup,cxy)]
+# _ZOOM_         }
+# _ZOOM_
+# _ZOOM_         set pt [list {} ? 0 0 routepoint $RINFO(who) $utm added]
+# _ZOOM_         set RINFO(pts) [linsert $RINFO(pts) $idx $pt]
+# _ZOOM_         ::Zoom::IsModified 1
+# _ZOOM_         ::Zoom::DrawPoints
+# _ZOOM_         ::Zoom::GuessDistance
+# _ZOOM_         ::Zoom::GuessClimbing
+# _ZOOM_     } elseif {$what eq "elevation"} {
+# _ZOOM_         ::Zoom::UpdateRoutePoint $DS(popup,who)
+# _ZOOM_         ::Zoom::GuessClimbing
+# _ZOOM_     } elseif {$what eq "split"} {
+# _ZOOM_         #::Zoom::Close
+# _ZOOM_         set utm [eval ::Zoom::canvas2utm $DS(popup,cxy)]
+# _ZOOM_         set ::state(popup,what) "zoom"
+# _ZOOM_         set ::state(popup,who) $RINFO(who)
+# _ZOOM_         set ::state(popup,latlon) [eval ::Data::utm2ll $utm]
+# _ZOOM_         ::Edit::CreateSplit
+# _ZOOM_     } elseif {$what eq "google"} {
+# _ZOOM_         set utm [eval ::Zoom::canvas2utm $DS(popup,cxy)]
+# _ZOOM_         set ll [eval ::Data::utm2ll $utm]
+# _ZOOM_         ::Zoom::Google zoompoint $ll
+# _ZOOM_     } elseif {$what eq "deleteall"} {
+# _ZOOM_         set RINFO(pts) [list [lindex $RINFO(pts) 0] [lindex $RINFO(pts) end]]
+# _ZOOM_         ::Zoom::IsModified 1
+# _ZOOM_         ::Zoom::DrawPoints
+# _ZOOM_         ::Zoom::GuessDistance
+# _ZOOM_         ::Zoom::GuessClimbing
+# _ZOOM_     }
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::IsModified -- called whenever modified status changes
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::IsModified {onoff args} {
+# _ZOOM_     set s [expr {$onoff ? "normal" : "disabled"}]
+# _ZOOM_
+# _ZOOM_     foreach w [winfo child ${::Zoom::T}.data] {
+# _ZOOM_         $w.save config -state $s
+# _ZOOM_         if {[winfo exists $w.usgs]} {
+# _ZOOM_             $w.usgs config -state $s
+# _ZOOM_         }
+# _ZOOM_     }
+# _ZOOM_     .sr_popup entryconfig 9 -state $s
+# _ZOOM_     ${::Zoom::T}.buttons.save config -state $s
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::FindSplit -- finds which leg the split point should be made on
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::FindSplit {} {
+# _ZOOM_     variable W
+# _ZOOM_     variable DS
+# _ZOOM_
+# _ZOOM_     foreach {cx cy} $DS(popup,cxy) break
+# _ZOOM_
+# _ZOOM_     set xy [$W coords road]
+# _ZOOM_     set best 0
+# _ZOOM_     set dist 999999
+# _ZOOM_     set seg {}
+# _ZOOM_     for {set i 0} {$i+2 < [llength $xy]} {incr i 2} {
+# _ZOOM_         foreach {x0 y0 x1 y1} [lrange $xy $i [expr {$i+3}]] break
+# _ZOOM_         set d [::Data::DistanceToLine $cx $cy $x0 $y0 $x1 $y1]
+# _ZOOM_         if {$d < $dist} {
+# _ZOOM_             set dist $d
+# _ZOOM_             set best $i
+# _ZOOM_             set seg [list $x0 $y0 $x1 $y1]
+# _ZOOM_         }
+# _ZOOM_     }
+# _ZOOM_     set best [expr {($best / 2) + 1}]
+# _ZOOM_     return [list $best $seg]
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::UpdateRoutePoint -- dialog to add elevation to a route point
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::UpdateRoutePoint {idx} {
+# _ZOOM_     variable RINFO
+# _ZOOM_     global nnode
+# _ZOOM_
+# _ZOOM_     unset -nocomplain nnode
+# _ZOOM_     set lat [int2lat [lindex $RINFO(pts) $idx 2]]
+# _ZOOM_     set lon [int2lat [lindex $RINFO(pts) $idx 3]]
+# _ZOOM_     set nnode(latlon) [concat $lat $lon]
+# _ZOOM_     foreach {lat lon} [::Display::PrettyLat $lat $lon] break
+# _ZOOM_
+# _ZOOM_     set txt "Add Route Point Elevation"
+# _ZOOM_     set nnode(wtitle) "$::state(progname) $txt"
+# _ZOOM_     set nnode(title)  "$txt\nLatitude $lat\nLongitude $lon"
+# _ZOOM_     set nnode(l0) Elevation
+# _ZOOM_     set nnode(e0) [lindex $RINFO(pts) $idx 1]
+# _ZOOM_     set nnode(t0) 1
+# _ZOOM_     set nnode(l1) "USGS Elevation"
+# _ZOOM_     set nnode(e1) "?"
+# _ZOOM_     set nnode(t1) 8
+# _ZOOM_     ::Edit::NewDlg "Route Point" 2 $idx
+# _ZOOM_     # Calls Edit::AddRoutePoint when done
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Edit::AddRoutePoint -- called from ::Zoom::UpdateRoutePoint's dialog
+# _ZOOM_ #
+# _ZOOM_ proc ::Edit::AddRoutePoint {idx} {
+# _ZOOM_     global nnode
+# _ZOOM_
+# _ZOOM_     set elev "?"
+# _ZOOM_     if {[string is double -strict $nnode(e0)]} {
+# _ZOOM_         set elev $nnode(e0)
+# _ZOOM_     }
+# _ZOOM_     lset ::Zoom::RINFO(pts) $idx 1 $elev
+# _ZOOM_     ::Zoom::IsModified 1
+# _ZOOM_     destroy .nnode
+# _ZOOM_     ::Zoom::DrawPoints
+# _ZOOM_     ::Zoom::GuessClimbing
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::SortCells -- sorts list of cells by closeness to given cell
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::SortCells {ox oy cells} {
+# _ZOOM_     set all {}
+# _ZOOM_     foreach cell $cells {
+# _ZOOM_         foreach {x y} $cell break
+# _ZOOM_         set dist [expr {($x - $ox)*($x - $ox) + ($y - $oy) * ($y - $oy)}]
+# _ZOOM_         lappend all [list $cell $dist]
+# _ZOOM_     }
+# _ZOOM_     set all [lsort -real -index 1 $all]
+# _ZOOM_     set cells {}
+# _ZOOM_     foreach cell $all { lappend cells [lindex $cell 0]}
+# _ZOOM_     return $cells
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # Save -- saves the current road into <zone dir>/user.nodes
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::Save {} {
+# _ZOOM_     variable RINFO
+# _ZOOM_     variable DS
+# _ZOOM_     global state roads nnode poi
+# _ZOOM_
+# _ZOOM_     ::Data::MarkModified $RINFO(what) $RINFO(who)
+# _ZOOM_     if {$RINFO(what) eq "road"} {
+# _ZOOM_         set rid $RINFO(who)
+# _ZOOM_         set ll {}
+# _ZOOM_         set elevs {}
+# _ZOOM_         foreach pt [lrange $RINFO(pts) 1 end-1] {
+# _ZOOM_             foreach {name elev lat lon type who utm} $pt break
+# _ZOOM_             if {$lat == 0} {                    ;# It got moved
+# _ZOOM_                 foreach {lat lon} [eval ::Data::utm2ll $utm] break
+# _ZOOM_             }
+# _ZOOM_             eval lappend ll [int2lat $lat] [int2lat $lon]
+# _ZOOM_             lappend elevs $elev
+# _ZOOM_         }
+# _ZOOM_         if {[llength $ll] == 1} {set ll {}}     ;# No xy data
+# _ZOOM_
+# _ZOOM_         # Store north, dist & south but get from our guess if bad
+# _ZOOM_         foreach what {north dist south} idx {2 3 4} {
+# _ZOOM_             if {[::BadMath::IsBad $RINFO($what)]} {
+# _ZOOM_                 set RINFO($what) "$RINFO(guess,$what)+?"
+# _ZOOM_             }
+# _ZOOM_             lset roads($rid) $idx $RINFO($what)
+# _ZOOM_         }
+# _ZOOM_         lset roads($rid) 6 $RINFO(title)        ;# Road name
+# _ZOOM_         lset roads($rid) 8 $ll                  ;# XY data
+# _ZOOM_         lset roads($rid) 9 $elevs               ;# Z data
+# _ZOOM_         lset roads($rid) 11 zoom                ;# Data source
+# _ZOOM_         ::Data::ReProcessOneRoad $rid
+# _ZOOM_         ::Zoom::IsModified 0
+# _ZOOM_         ::Route::StatRoute 1
+# _ZOOM_         return
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     if {$RINFO(what) eq "node"} {
+# _ZOOM_         set nnode(e0) $RINFO(title)             ;# Put into Edit's global array
+# _ZOOM_         set nnode(e1) $RINFO(ele)
+# _ZOOM_         set nnode(e2) $RINFO(usgs)
+# _ZOOM_         set utm [lindex $RINFO(pts) 0 6]
+# _ZOOM_         foreach {lat lon} [eval ::Data::utm2ll $utm] break
+# _ZOOM_         set nnode(latlon) [list $lat 0 0 $lon 0 0]
+# _ZOOM_         ::Edit::AddNode $RINFO(who)
+# _ZOOM_         ::Zoom::IsModified 0
+# _ZOOM_         return
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     if {$RINFO(what) eq "poi"} {
+# _ZOOM_         set utm [lindex $RINFO(pts) 0 6]
+# _ZOOM_         foreach {lat lon} [eval ::Data::utm2ll $utm] break
+# _ZOOM_         lset poi($RINFO(who)) 1 $RINFO(title)
+# _ZOOM_         lset poi($RINFO(who)) 2 $lat
+# _ZOOM_         lset poi($RINFO(who)) 3 $lon
+# _ZOOM_         lset poi($RINFO(who)) 6 [::Display::pos2canvas root $lat $lon]
+# _ZOOM_         ::Display::DrawPOI $RINFO(who)
+# _ZOOM_         ::Zoom::IsModified 0
+# _ZOOM_         return
+# _ZOOM_     }
+# _ZOOM_     if {$RINFO(what) eq "geo"} {
+# _ZOOM_         set utm [lindex $RINFO(pts) 0 6]
+# _ZOOM_         foreach {lat lon} [eval ::Data::utm2ll $utm] break
+# _ZOOM_         lset ::GPS::wpts($RINFO(who)) 0 $lat
+# _ZOOM_         lset ::GPS::wpts($RINFO(who)) 1 $lon
+# _ZOOM_         lset ::GPS::wpts($RINFO(who)) 3 $RINFO(title)
+# _ZOOM_         lset ::GPS::wpts($RINFO(who)) 6 [::Display::pos2canvas root $lat $lon]
+# _ZOOM_         ::GPS::DrawWpts g 0
+# _ZOOM_         ::Zoom::IsModified 0
+# _ZOOM_     }
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::Google -- brings up google maps at a specific lat/lon
+# _ZOOM_ # NB. google doesn't supply any marker on the map yet
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::Google {what {who ?}} {
+# _ZOOM_     variable ZMAP
+# _ZOOM_     variable google
+# _ZOOM_
+# _ZOOM_     if {$what eq "zoom" && $ZMAP(what) eq "road"} { ;# Called from w/i zoom
+# _ZOOM_         set what $::Zoom::ZMAP(what)
+# _ZOOM_         set who $::Zoom::ZMAP(who)
+# _ZOOM_     } elseif {$what eq "popup"} {
+# _ZOOM_         set what $::state(popup,what)
+# _ZOOM_         set who $::state(popup,who)
+# _ZOOM_     }
+# _ZOOM_     set what [string tolower $what]
+# _ZOOM_     set last $google(last)
+# _ZOOM_     set google(last) [list $what $who]
+# _ZOOM_
+# _ZOOM_     set to ""
+# _ZOOM_     set mid ""
+# _ZOOM_     if {$what eq "node"} {
+# _ZOOM_         foreach {. . lat lon} $::nodes($who) break
+# _ZOOM_         set from "$lat+-$lon"
+# _ZOOM_     } elseif {$what eq "zoom"} {
+# _ZOOM_         set utm [lindex $::Zoom::RINFO(pts) 0 6]
+# _ZOOM_         foreach {lat lon} [eval ::Data::utm2ll $utm] break
+# _ZOOM_         set from "$lat+-$lon"
+# _ZOOM_     } elseif {$what eq "poi"} {
+# _ZOOM_         foreach {. . lat lon} $::poi($who) break
+# _ZOOM_         set from "$lat+-$lon"
+# _ZOOM_     } elseif {$what eq "geo"} {
+# _ZOOM_         foreach {lat lon} $::GPS::wpts($who) break
+# _ZOOM_         set from "$lat+-$lon"
+# _ZOOM_     } elseif {$what eq "coords"} {
+# _ZOOM_         foreach {lat lon} [::Coords::Where] break
+# _ZOOM_         set lat [eval lat2int $lat]
+# _ZOOM_         set lon [eval lat2int $lon]
+# _ZOOM_         set from "$lat+-$lon"
+# _ZOOM_     } elseif {$what eq "map" || $what eq "embellishment"} {
+# _ZOOM_         foreach {x y} $::state(popup) break
+# _ZOOM_         foreach {. . . . lat lon} [::Display::canvas2pos $x $y] break
+# _ZOOM_         set from "$lat+-$lon"
+# _ZOOM_     } elseif {$what eq "zoompoint"} {
+# _ZOOM_         foreach {lat lon} $who break
+# _ZOOM_         set from "$lat+-$lon"
+# _ZOOM_     } elseif {$what eq "road"} {
+# _ZOOM_         foreach {nid1 nid2} $::roads($who) break
+# _ZOOM_         foreach {. . lat lon} $::nodes($nid1) break
+# _ZOOM_         set from "$lat+-$lon"
+# _ZOOM_         foreach {. . lat lon} $::nodes($nid2) break
+# _ZOOM_         set to "$lat+-$lon"
+# _ZOOM_
+# _ZOOM_         # If repeating google map road, then put in a midpoint
+# _ZOOM_         if {$last eq [list $what $who]} {
+# _ZOOM_             set xy [lindex $::roads($who) 8]
+# _ZOOM_             set len [expr {[llength $xy] / 6}]
+# _ZOOM_             if {$len > 0} {
+# _ZOOM_                 set n [expr {($len/2) * 6}]
+# _ZOOM_                 set lat3 [lrange $xy $n [expr {$n+2}]]
+# _ZOOM_                 set lon3 [lrange $xy [expr {$n+3}] [expr {$n+5}]]
+# _ZOOM_                 set lat [eval lat2int $lat3]
+# _ZOOM_                 set lon [eval lat2int $lon3]
+# _ZOOM_                 set mid "$lat+-$lon"
+# _ZOOM_             }
+# _ZOOM_         }
+# _ZOOM_     } elseif {$what eq "wpt"} {
+# _ZOOM_         foreach {lat lon} $::GPS::wpts($who) break
+# _ZOOM_         set from "$lat+-$lon"
+# _ZOOM_     } else {
+# _ZOOM_         puts "ERROR: unknown item for zoom google: '$what' '$who'"
+# _ZOOM_         return
+# _ZOOM_     }
+# _ZOOM_
+# _ZOOM_     if {$to eq ""} {
+# _ZOOM_         set url "http://maps.google.com/maps?q=$from"
+# _ZOOM_     } elseif {$mid eq ""} {
+# _ZOOM_         set url "http://maps.google.com/maps?saddr=$from&daddr=$to"
+# _ZOOM_     } else {
+# _ZOOM_         set url "http://maps.google.com/maps?saddr=$from&daddr=$mid+to:$to"
+# _ZOOM_     }
+# _ZOOM_     WebPage $url
+# _ZOOM_     return $url
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::USGSAllWaypoints -- gets the USGS elevation for all waypoints
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::USGSAllWaypoints {} {
+# _ZOOM_     variable W
+# _ZOOM_     variable RINFO
+# _ZOOM_
+# _ZOOM_     set who {}
+# _ZOOM_     for {set i 0} {$i < [llength $RINFO(pts)]} {incr i} {
+# _ZOOM_         set elev [lindex $RINFO(pts) $i 1]
+# _ZOOM_         if {[string is double -strict $elev] && $elev > 0} continue
+# _ZOOM_         lappend who $i
+# _ZOOM_     }
+# _ZOOM_     if {$who eq {}} return
+# _ZOOM_
+# _ZOOM_     # Post dialog box for all queries
+# _ZOOM_     set dlg [::USGS::_MakeWaitDialog [winfo toplevel $W]]
+# _ZOOM_     after idle [list ::Zoom::_USGSAllWaypoints2 $dlg $who]
+# _ZOOM_     DoGrab $dlg $dlg
+# _ZOOM_     ::Zoom::GuessClimbing
+# _ZOOM_ }
+# _ZOOM_ ##+##########################################################################
+# _ZOOM_ #
+# _ZOOM_ # ::Zoom::_USGSAllWaypoints2 -- helper for ::Zoom::USGSAllWaypoints
+# _ZOOM_ #
+# _ZOOM_ proc ::Zoom::_USGSAllWaypoints2 {dlg who} {
+# _ZOOM_     variable RINFO
+# _ZOOM_
+# _ZOOM_     set cnt 0
+# _ZOOM_     foreach idx $who {
+# _ZOOM_         incr cnt
+# _ZOOM_         if {! [winfo exists $dlg]} break
+# _ZOOM_
+# _ZOOM_         foreach {. . lat lon . . utm} [lindex $RINFO(pts) $idx] break
+# _ZOOM_         if {$lat == 0} {                        ;# In utm
+# _ZOOM_             foreach {lat lon} [eval ::Data::utm2ll $utm] break
+# _ZOOM_             lset RINFO(pts) $idx 2 $lat
+# _ZOOM_             lset RINFO(pts) $idx 3 $lon
+# _ZOOM_         }
+# _ZOOM_         #set lat [lindex $RINFO(pts) $idx 2]
+# _ZOOM_         #set lon [lindex $RINFO(pts) $idx 3]
+# _ZOOM_         set latlon [concat [int2lat $lat] [int2lat $lon]]
+# _ZOOM_         set ::USGS::S(msg) "Querying waypoint $cnt of [llength $who]"
+# _ZOOM_
+# _ZOOM_         set usgs [::USGS::Query "" $latlon]
+# _ZOOM_         if {[string is double -strict $usgs]} {
+# _ZOOM_             lset RINFO(pts) $idx 1 $usgs
+# _ZOOM_         }
+# _ZOOM_         update
+# _ZOOM_     }
+# _ZOOM_     ::Zoom::IsModified 1
+# _ZOOM_     ::Zoom::DrawPoints
+# _ZOOM_     destroy $dlg
+# _ZOOM_ }
+# _ZOOM_
+# _ZOOM_ proc ::Zoom::Elevs {} {
+# _ZOOM_     package require Plotchart
+# _ZOOM_     variable RINFO
+# _ZOOM_
+# _ZOOM_     unset -nocomplain X
+# _ZOOM_     unset -nocomplain Y
+# _ZOOM_     set X {}
+# _ZOOM_     set Y {}
+# _ZOOM_     for {set i 0} {$i < [llength $RINFO(pts)]} {incr i} {
+# _ZOOM_         set elev [lindex $RINFO(pts) $i 1]
+# _ZOOM_         if {! [string is double -strict $elev]} continue
+# _ZOOM_         lappend X $i
+# _ZOOM_         lappend Y $elev
+# _ZOOM_     }
+# _ZOOM_     set y_sort [lsort -real $Y]
+# _ZOOM_     set ys [::Plotchart::determineScale [lindex $y_sort 0] [lindex $y_sort end]]
+# _ZOOM_     set xs [::Plotchart::determineScale [lindex $X 0] [lindex $X end]]
+# _ZOOM_     lset xs 2 1
+# _ZOOM_
+# _ZOOM_     set W .elevs
+# _ZOOM_     if {! [winfo exists $W]} {
+# _ZOOM_         destroy W
+# _ZOOM_         toplevel $W
+# _ZOOM_         wm transient $W .
+# _ZOOM_         ::ttk::button $W.replot -text "Replot" -command ::Zoom::Elevs
+# _ZOOM_         ::ttk::button $W.ok -text "Dismiss" -command [list destroy $W]
+# _ZOOM_         set w [expr {.8 * [winfo screenwidth .]}]
+# _ZOOM_         canvas $W.c -width $w -bd 0 -highlightthickness 0
+# _ZOOM_         pack $W.c -expand 1 -fill both -side top
+# _ZOOM_         pack $W.replot $W.ok -side left -expand 1 -pady 10
+# _ZOOM_     } else {
+# _ZOOM_         raise $W
+# _ZOOM_         $W.c config -width [winfo width $W.c] -height [winfo height $W.c]
+# _ZOOM_     }
+# _ZOOM_     $W.c delete all
+# _ZOOM_     set s [::Plotchart::createXYPlot $W.c $xs $ys]
+# _ZOOM_     foreach x $X y $Y {
+# _ZOOM_         $s plot series1 $x $y
+# _ZOOM_     }
+# _ZOOM_     $W.c itemconfig data -tag series1 -width 2
+# _ZOOM_     set xy0 [::Plotchart::coordsToPixel $W.c [lindex $X 0] [lindex $Y 0]]
+# _ZOOM_     set xy1 [::Plotchart::coordsToPixel $W.c [lindex $X end] [lindex $Y end]]
+# _ZOOM_
+# _ZOOM_     $W.c create line [concat $xy0 $xy1] -tag a -fill green -width 2
+# _ZOOM_ }
+# _ZOOM_ ## EON ZOOM
 ## BON CHOOSEFONT
 ##+##########################################################################
 #
@@ -35000,6 +35047,7 @@ proc ::URL::GetUrlFollowRedirects {url args} {
     for {set i 0} {$i < 5} {incr i} {
         ::http::cleanup $token
         set n [catch {set token [eval http::geturl $url {*}$args]} emsg]
+        if {$n} { error "$emsg" }
         set ncode [::http::ncode $token]
         if {![string match {30[1237]} [::http::ncode $token]]} {return $token}
 
