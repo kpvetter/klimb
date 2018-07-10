@@ -400,6 +400,10 @@ proc test_addN {total} {
     $pgu Close
 }
 
+
+proc alink {var} {
+    uplevel \#0 upvar \#0 $var [lindex [split $var ":"] end]
+}
 alink ::PGU::Q
 alink ::PGU::queue
 return 1

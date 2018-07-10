@@ -10,7 +10,7 @@
 foreach var {ZMAP RINFO T W W2 DS STATIC SCREEN FETCH COLORS stats google lcxy} {
     uplevel #0 upvar #0 ::Zoom::$var ::$var
 }
-source klippy.tsh
+source klippy.tcl
 proc ss {} { uplevel 1 source klippy.tsh }
 
 set what road ; set who r759
