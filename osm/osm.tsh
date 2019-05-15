@@ -1,0 +1,268 @@
+#!/bin/sh
+# Restart with tcl: -*- mode: tcl; tab-width: 8; -*- \
+exec tclsh $0 ${1+"$@"}
+
+##+##########################################################################
+#
+# osm.tsh -- <description>
+# by Keith Vetter 2018-11-21
+#
+
+#package require Tk
+catch {wm withdraw .}
+
+package require tdom
+
+
+set SITE calero
+set SITE eureka
+set xmlFile "~/misc/klimb/osm/$SITE.xml"
+set nodeFile "~/misc/klimb/Dogs.zone/$SITE.nodes"
+
+set rawXML [::tDOM::xmlReadFile $xmlFile] ; list
+set dom [::dom parse $rawXML]
+set lisa 575338061
+set lisa2 575338078
+set creek 49638949
+set lookout 559827760
+
+proc WayToKlr {dom id nodeFile} {
+    puts stderr "Extracting $id"
+    set data [WayToKlrString $dom $id]
+
+    set fout [open $nodeFile "a"]
+    puts $fout "\n# OSM ID: $id"
+    puts $fout $data
+    close $fout
+}
+
+proc WayToKlrString {dom id} {
+    set way [FindWay $dom $id]
+    set waypoints [dict get $way waypoints]
+    set name "OSM road"
+    if {[dict exists $way tags name]} {
+        set name [dict get $way tags name]
+    }
+    _DictPrint [dict get $way tags]
+
+    set result "# W Waypoint data\n"
+    append result "# W id  lat lon alt usgs\n"
+    set cnt 0
+    foreach wpt $waypoints {
+        incr cnt
+        single_line "\r$cnt/[llength $waypoints]"
+        set meta [FindWaypoint $dom $wpt]
+        set line "W [string cat W $wpt] [dict get $meta attr lat] [dict get $meta attr lon]"
+        append result "$line\n"
+    }
+    puts stderr ""
+    append result "\n"
+
+    append result "# Node data\n"
+    append result "# N nodeid \"description\" alt lat1 lat2 lat3 lon1 lon2 lon3 usgs\n"
+    set startId [string cat N [lindex $waypoints 0]]
+    set start [FindWaypoint $dom [lindex $waypoints 0]]
+    set lat [dict get $start attr lat]
+    set lon [dict get $start attr lon]
+    append result "N $startId start ? $lat 0 0 $lon 0 0\n"
+
+    set endId [string cat N [lindex $waypoints end]]
+    set end [FindWaypoint $dom [lindex $waypoints end]]
+    set lat [dict get $end attr lat]
+    set lon [dict get $end attr lon]
+    append result "N $endId end ? $lat 0 0 $lon 0 0\n"
+    append result "\n"
+
+    append result "# Road data\n"
+    append result "# R roadid id1 id2 north distance south type name comment ...\n"
+    set rid [string cat R $id]
+    set line "R $rid $startId $endId ? ? ? 4 \"$name\" {} "
+    set kpts [lmap pt [lrange $waypoints 1 end-1] {string cat W $pt}]
+    append line "\{wpts $kpts\}\n"
+    append result $line
+
+    return $result
+}
+proc single_line {msg} {
+    if {[info commands tkcon] ne ""} {
+        tkcon console insert {output -1 line} $msg stderr
+    } else {
+        puts -nonewline stderr $msg
+    }
+}
+
+proc FindWay {dom id} {
+    global xpath
+    set xpath "//way\[@id=${id}\]"
+    set nodes [$dom selectNodes $xpath]
+    if {[llength $nodes] != 1} {error "bad xpath search: $xpath"}
+    set node [lindex $nodes 0]
+    set way [ExtractMeta $node]
+
+    append xpath "/nd"
+    set waypointNodes [$dom selectNodes $xpath]
+    set waypoints {}
+    foreach node $waypointNodes {
+        set nid [dict get [ExtractAttr $node] ref]
+        lappend waypoints $nid
+    }
+    dict set way waypoints $waypoints
+    return $way
+}
+
+proc FindWaypoint {dom id} {
+    set xpath "//node\[@id=${id}\]"
+    set nodes [$dom selectNodes $xpath]
+    if {[llength $nodes] != 1} {error "bad xpath search: $xpath"}
+    set node [lindex $nodes 0]
+    return [ExtractMeta $node]
+}
+proc ExtractMeta {node} {
+    return [dict create attr [ExtractAttr $node] tags [ExtractTags $node]]
+    return [dict merge [ExtractAttr $node] [ExtractTags $node]]
+}
+proc ExtractAttr {node} {
+    set attr [dict create]
+    foreach key [$node attributes] {
+        dict set attr $key [$node getAttribute $key]
+    }
+    return $attr
+}
+proc ExtractTags {node} {
+    set tdom [dom parse [$node asXML]]
+    set tags [dict create]
+    foreach node [$tdom selectNodes //tag] {
+        dict set tags [$node getAttribute k] [$node getAttribute v]
+    }
+    return $tags
+}
+
+
+proc NamedPoints {dom} {
+    set xpath {//node/tag[@k='name']}
+    set nodes [$dom selectNodes $xpath]
+    foreach node $nodes {
+        ShowPoint $node
+    }
+}
+proc ShowPoint {nameNode} {
+    set name [$nameNode getAttribute v]
+    set parent [$nameNode ancestor 1]
+    set lat [$parent getAttribute lat]
+    set lon [$parent getAttribute lon]
+    puts "$name @ $lat $lon"
+}
+
+
+set PREFIX(N) "# Node data\n# N nodeid \"description\" alt lat1 lat2 lat3 lon1 lon2 lon3 usgs"
+set PREFIX(N2) "# Node data\n# N wid \"description\""
+set PREFIX(R) "# Road data\n# R roadid id1 id2 north distance south type name comment xy survey"
+set PREFIX(W) "# W Waypoint data\n# W id  lat lon alt"
+
+proc SortNodeFile {nodeFile} {
+
+    set fin [open $nodeFile r]
+    set lines [split [string trim [read $fin]] \n]
+    close $fin
+
+    unset -nocomplain SET
+    unset -nocomplain ::DUPES
+    foreach line $lines {
+        set line [string trim $line]
+        if {$line eq ""} continue
+        if {[string match "#*" $line]} continue
+
+        if {[info exists SET($line)]} {
+            lappend ::dupes $line
+        } else {
+            set SET($line) 1
+        }
+    }
+
+    set lines [lsort -dictionary [array names SET]]
+    set outfile $nodeFile
+    # set outfile /tmp/foo
+    set fout [open $outfile w]
+    set lastPrefix ""
+    foreach line $lines {
+        set prefix [string index $line 0]
+        if {$prefix ne $lastPrefix} {
+            puts $fout "\n"
+            puts $fout $::PREFIX($prefix)
+            set lastPrefix $prefix
+        }
+        puts $fout $line
+    }
+    close $fout
+    puts "Sorted $nodeFile   Dupes: [llength $::dupes]"
+}
+proc _DictPrint {d {pattern *} {skip ""}} {
+    # Weird, won't work if named ::tcl::dict::print
+    if {$skip ne ""} {
+        set keys {}
+        foreach key [dict keys $d $pattern] {
+            if {! [string match $skip $key]} {
+                lappend keys $key
+            }
+        }
+    } else {
+        set keys [dict keys $d $pattern]
+    }
+    set longest [tcl::mathfunc::max 0 {*}[lmap key $keys {string length $key}]]
+    foreach key [lsort -dictionary $keys] {
+        puts [format "  %-${longest}s = %s" $key [dict get $d $key]]
+    }
+}
+
+proc ExtractAllRoads {dom} {
+    set xpath "//way"
+    set nodes [$dom selectNodes $xpath]
+
+    set result [dict create]
+    foreach node $nodes {
+        set meta [ExtractMeta $node]
+        if {[dict exists $meta tags name]} {
+            set name [dict get $meta tags name]
+            set id [dict get $meta attr id]
+            dict lappend result $name $id
+        }
+    }
+
+    return $result
+}
+
+proc FindRoads {dom} {
+    set xpath "//way"
+    set nodes [$dom selectNodes $xpath]
+    foreach node $nodes {
+        set meta [ExtractMeta $node]
+        if {[dict exists $meta tags name]} {
+            puts "====== [dict get $meta attr id] ====="
+            # _DictPrint [dict get $meta attr]
+            _DictPrint [dict get $meta tags] "*" "tiger:*"
+        }
+    }
+}
+proc FindDirtRoads {dom} {
+    set xpath "//way/tag\[@v='dirt'\]"
+    set tags [$dom selectNodes $xpath]
+    foreach tag $tags {
+        set node [$tag ancestor 1]
+        set meta [ExtractMeta $node]
+        puts "====== [dict get $meta attr id] ====="
+        _DictPrint [dict get $meta tags]
+    }
+}
+
+if {$tcl_interactive} return
+set visited {}
+foreach id $argv {
+    if {[string match "http*" $id]} {
+        set id [file tail $id]
+    }
+    if {$id in $visited} { puts "already visited $id, skipping"; continue}
+    WayToKlr $dom $id $nodeFile
+    lappend visited $id
+}
+SortNodeFile $nodeFile
+return

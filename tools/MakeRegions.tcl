@@ -16,19 +16,23 @@ exec tclsh $0 ${1+"$@"}
 package provide app-makeregions 1.0
 package require Tk
 package require img::jpeg
+if {[file isdirectory ../packages]} {
+    cd ..
+}
+
+if {[file isdirectory packages]} {
+    lappend auto_path [pwd]
+}
 source packages/maps.tsh
+
 catch {package require pgu 1.0}
 if {[catch {package present pgu}]} {
-    if {[file exists packages/pgu.tcl]} {
-	source packages/pgu.tcl
-    } else {
-	wm withdraw .
-	set msg "ERROR: Cannot locate the PGU package for KLIMB.\n\n"
-	append msg "Download and place in the KLIMB directory:\n"
-	append msg "http://www.klimb.org/binaries/pgu.tcl\n\n"
-	tk_messageBox -icon error -message $msg -title "KLIMB MakeRegions"
-	exit
-    }
+    wm withdraw .
+    set msg "ERROR: Cannot locate the PGU package for KLIMB.\n\n"
+    append msg "Download and place in the KLIMB directory:\n"
+    append msg "http://www.klimb.org/binaries/pgu.tcl\n\n"
+    tk_messageBox -icon error -message $msg -title "KLIMB MakeRegions"
+    exit
 }
 
 namespace eval ::Zone {}
@@ -39,7 +43,6 @@ set state(hdir) ""
 set state(tcnt) 0
 set state(nofetch) 0				;# For debugging
 set state(nocache) 0				;# For debugging
-set state(nocache) 1				;# For debugging
 
 unset -nocomplain C
 array set C {regionName "" regionFile ".klr" nodeFile "klimb.nodes"}
@@ -178,7 +181,9 @@ proc DoDisplay {} {
     .c bind all <B1-Motion> [list BClick 0 %x %y]
     .c bind all <Button-3> [list BClick 1 %x %y]
     .c bind all <B3-Motion> [list BClick 1 %x %y]
-    .c bind all <Control-Button-1> [list BCtrlClick %x %y]
+    .c bind all <Control-Button-1> [list BClick 1 %x %y]
+    .c bind all <Control-B1-Motion> [list BClick 1 %x %y]
+    #KPV .c bind all <Control-Button-1> [list BCtrlClick %x %y]
     bind .c <2>		 [bind Text <2>]	 ;# Enable dragging w/ <2>
     bind .c <B2-Motion>	 [bind Text <B2-Motion>]
     bind all <Key-F2> {console show}
@@ -388,6 +393,7 @@ proc FakeBClick {who lat lon} {
 proc BCtrlClick {cx cy} {
     global WPT
 
+    # Click to locate a waypoint
     set x [.c canvasx $cx]
     set y [.c canvasy $cy]
     lassign [canvas2ll $x $y] lat lon
@@ -459,7 +465,7 @@ proc tracer {var1 var2 op} {
     global C
 
     if {$var2 eq "regionName"} {
-	set C(regionFile) "$C(regionName).klr"
+	set C(regionFile) [string map {" " ""} "$C(regionName).klr"]
     }
     if {$C(regionFile) eq "" || $C(regionFile) eq ".klr" ||
         $C(nodeFile) eq "" || $C(tile,0) eq {} || $C(tile,1) eq {}} {
@@ -684,9 +690,9 @@ proc FetchMaps {} {
     MakeProgressBar [llength $downloads]
 
     set ::errMaps {}
-    foreach download $downloads {
-	GetOneMap {*}$download
-	append klrText [IntoKLR {*}$download] "\n"
+    foreach cookie $downloads {
+	GetOneMap $cookie
+	append klrText [IntoKLR {*}$cookie] "\n"
     }
     ::PGU::Launch
     ::PGU::Wait
@@ -763,20 +769,24 @@ proc IntoKLR {tile fname url} {
     set result "map=$mapName:$scale:$lat0 0 0 $lon0 0 0 $lat1 0 0 $lon1 0 0"
     return $result
 }
-proc GetOneMap {tile fname url} {
+set tile {11 795 329}
+set fname "/tmp/foo.png"
+set url http://khm.google.com/vt/lbw/lyrs=p&x=329&y=795&z=11
+proc GetOneMap {cookie} {
     global state
 
+    lassign $cookie tile fname url
     if {! $state(nocache) && [file exists $fname]} {
         ShowTileStatus $tile "cached"
     } elseif {$state(nofetch)} {
         ShowTileStatus $tile "-"
     } else {
-        set cookie [list $tile $fname $url]
         ::PGU::Add $url $cookie GotPageCmd PGUStatusCmd
     }
 }
 proc GotPageCmd {token cookie args} {
     StepProgressBar
+    puts -nonewline "." ; flush stdout
     if {[::http::status $token] ne "ok"} {	;# Some kind of failure
 	::http::cleanup $token
         lappend ::errMaps [list $type $cookie]
@@ -1048,7 +1058,48 @@ proc ::tcl::dict::get? {args} {
     } on error message { ::set x {} }
     return $x
 }
+################################################################
+proc ProcessOldKLR {fname} {
+    global line
+    set fin [open $fname r]
+    set lines [split [string trim [read $fin]] \n]
+    close $fin
 
+    # map=Maps/CycleMaps/15/5251/12729.png:15:37.22158045839798 0 0 122.310791015625 0 0 37.212831514467425 0 0 122.2998046875 0 0
+
+    set lats {}
+    set lons {}
+    foreach line $lines {
+        if {[string match "name=*" $line]} {
+            lassign [split $line "="] . regionName
+            continue
+        }
+        if {! [string match "map=*" $line]} continue
+        lassign [split $line ":"] . scale latlon
+        scan $latlon "%f %f %f %f %f %f %f %f %f %f %f %f" \
+            lat1a lat1b lat1c \
+            lon1a lon1b lon1c \
+            lat2a lat2b lat2c \
+            lon2a lon2b lon2c
+        lappend lats [lat2int $lat1a $lat1b $lat1c]
+        lappend lons [lat2int $lon1a $lon1b $lon1c]
+        lappend lats [lat2int $lat2a $lat2b $lat2c]
+        lappend lons [lat2int $lon2a $lon2b $lon2c]
+    }
+    set lats [lsort -unique $lats]
+    set lons [lsort -unique $lons]
+
+    puts "regionName: $regionName"
+    puts "scale: $scale"
+    puts "FakeBClick 0 [lindex $lats end] [lindex $lons end]"
+    puts "FakeBClick 1 [lindex $lats 0] [lindex $lons 0]"
+    set ::C(regionName) $regionName
+    set ::C(scale) $scale
+    FakeBClick 0 [lindex $lats end] [lindex $lons end]
+    FakeBClick 1 [lindex $lats 0] [lindex $lons 0]
+    #puts "MakeRegion"
+    #MakeRegion
+}
 ################################################################
 
 
@@ -1064,3 +1115,23 @@ if {[file readable $state(wptFile)]} {
     source $state(wptFile)
 }
 return 1
+
+
+region="Google Terrain" 17
+
+Thornewood
+ FakeBClick 0 37.397623775046526 122.26598739624023
+ FakeBClick 1 37.37273788043769 122.22573280334473
+
+Teague
+  FakeBClick 0 37.39634613320078  122.332763671875
+  FakeBClick 1 37.439974052282125 122.255859375
+
+  FakeBClick 0 37.439974052282125 -122.332763671875
+  FakeBClick 1 37.39634613320078  -122.255859375
+
+
+
+Gazos Creek
+  FakeBClick 0 37.22158045839798 122.310791015625
+  FakeBClick 1 37.16907157714157 122.244873046875

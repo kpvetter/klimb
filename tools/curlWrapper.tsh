@@ -1,0 +1,56 @@
+#!/bin/sh
+# Restart with tcl: -*- mode: tcl; tab-width: 8; -*- \
+exec tclsh $0 ${1+"$@"}
+
+##+##########################################################################
+#
+# curlWrapper.tsh -- <description>
+# by Keith Vetter 2018-07-23
+#
+
+#package require Tk
+catch {wm withdraw .}
+
+set url http://httpbin.org/get?a=b
+set url1 http://khm.google.com/vt/lbw/lyrs=p&x=329&y=795&z=11
+
+
+proc CurlUrl {url fname} {
+    exec curl -s -D /tmp/curl_meta $url > $fname
+    set fin [open /tmp/foo r]
+    set lines [split [string trim [read $fin]] \n]
+    close $fin
+    set dict [dict create url $url]
+    foreach line [lrange $lines 1 end] {
+        set n [regexp {^(.*?):(.*?)$} $line . key value]
+        if {$n} {
+            dict set dict $key [string trim $value]
+        }
+    }
+    return $dict
+}
+proc CurlUrl2 {url fname} {
+    set data [exec curl -s $url] ; list
+    set fout [open $fname wb]
+    puts -nonewline $fout $data
+    close $fout
+}
+
+CurlUrl $url1 /tmp/foo.curl1.jpg
+CurlUrl2 $url1 /tmp/foo.curl2.jpg
+
+
+
+proc GetUrl {url} {
+    set data [exec curl -s -D /tmp/foo $url] ; list
+    set fin [open /tmp/foo r]
+    set lines [split [string trim [read $fin]] \n]
+    set dict [dict create url $url]
+    foreach line [lrange $lines 1 end] {
+        set n [regexp {^(.*?):(.*?)$} $line . key value]
+        if {$n} {
+            dict set dict $key [string trim $value]
+        }
+    }
+    return [list $dict $data]
+}

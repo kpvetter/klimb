@@ -1,0 +1,19 @@
+
+
+# Node data
+# N nodeid "description" alt lat1 lat2 lat3 lon1 lon2 lon3 usgs
+N2 W801090033 node
+N2 W801090036 osm_node
+
+
+# Road data
+# R roadid id1 id2 north distance south type name comment xy survey
+R R72660739 W801090033 W801090036 ? ? ? 4 "Buzzard Lagoon Road" {} {wpts W862818644 W91069894}
+
+
+# W Waypoint data
+# W id  lat lon alt
+W W91069894 37.0305997 -121.8306954] ?
+W W801090033 37.0298183 -121.8300697] ?
+W W801090036 37.0308673 -121.8308640] ?
+W W862818644 37.0303074 -121.8303655] ?

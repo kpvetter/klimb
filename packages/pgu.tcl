@@ -303,3 +303,9 @@ proc ::PGU::Log {args} {
 }
 
 return 1
+
+set missing {}
+foreach m $downloads {
+    lassign $m tile fname url
+    if {! [file exists $fname]} { lappend missing [list $fname $url] }
+}

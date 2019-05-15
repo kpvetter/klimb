@@ -1,0 +1,73 @@
+#!/bin/sh
+# Restart with tcl: -*- mode: tcl; tab-width: 8; -*- \
+exec tclsh $0 ${1+"$@"}
+
+##+##########################################################################
+#
+# getRegionRange.tsh -- <description>
+# by Keith Vetter 2018-07-24
+#
+
+#package require Tk
+catch {wm withdraw .}
+
+proc lat2int {lat1 lat2 lat3} {
+    scan "$lat1 $lat2 $lat3" "%g %g %g" lat1 lat2 lat3
+    return [expr {abs($lat1) + $lat2 / 60.0 + $lat3 / 3600.0}]
+}
+
+proc ProcessKLR {fname} {
+    global line
+    set fin [open $fname r]
+    set lines [split [string trim [read $fin]] \n]
+    close $fin
+
+    # map=Maps/CycleMaps/15/5251/12729.png:15:37.22158045839798 0 0 122.310791015625 0 0 37.212831514467425 0 0 122.2998046875 0 0
+
+    set lats {}
+    set lons {}
+    foreach line $lines {
+        if {[string match "name=*" $line]} {
+            lassign [split $line "="] . regionName
+            continue
+        }
+        if {! [string match "map=*" $line]} continue
+        lassign [split $line ":"] . scale latlon
+        scan $latlon "%f %f %f %f %f %f %f %f %f %f %f %f" \
+            lat1a lat1b lat1c \
+            lon1a lon1b lon1c \
+            lat2a lat2b lat2c \
+            lon2a lon2b lon2c
+        lappend lats [lat2int $lat1a $lat1b $lat1c]
+        lappend lons [lat2int $lon1a $lon1b $lon1c]
+        lappend lats [lat2int $lat2a $lat2b $lat2c]
+        lappend lons [lat2int $lon2a $lon2b $lon2c]
+    }
+    set lats [lsort -unique $lats]
+    set lons [lsort -unique $lons]
+
+
+    set result "\n"
+    append result "set ::C(regionName) \"$regionName\"\n"
+    append result "set ::C(scale) $scale\n"
+    append result "FakeBClick 0 [lindex $lats end] [lindex $lons end]\n"
+    append result "FakeBClick 1 [lindex $lats 0] [lindex $lons 0]\n"
+    append result "MakeRegion\n"
+    return $result
+}
+set fname /Users/keith/misc/klimb/Dogs.zone/Thornewood.klr
+if {$argv eq {}} { set argv [list $fname] }
+foreach arg $argv {
+    set result [ProcessKLR $arg]
+    puts $result
+}
+
+return
+
+
+Thornewood
+ FakeBClick 0 37.397623775046526 122.26598739624023
+ FakeBClick 1 37.37273788043769  122.22573280334473
+
+FakeBClick 0 37.39852813274014 122.266845703125
+FakeBClick 1 37.37233994583471 122.22564697265625

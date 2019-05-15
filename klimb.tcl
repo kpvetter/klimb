@@ -21,9 +21,22 @@ if {! $tcl_interactive} {
     tkconclient::start 9876
 }
 
+# OSM data
+# https://www.openstreetmap.org/#map=16/37.1844/-121.8007
+# To get data for bounding box of screen:
+#    Export -> Overpass API    : Download
+# To lookup up item id:
+#    Edit mode
+#    click item
+#    click "View on openstreetmap.org" (bottom left)
+#    extract ID from URL
+# Lisa Killough Trail: 575338061
+
+
+# python geopy may have altitude data
 
 set state(progname) KLIMB
-set state(version) 4.40
+set state(version) 4.50
 set state(build) ""                             ;# Gets set in ::Init::Init
 
 # TODO
@@ -1903,6 +1916,7 @@ proc ::Data::ReadMapData {} {
         set result [::Data::ReadMapData2 $fname]
         append errmsg $result
     }
+    ::Data::ProcessWpts
     ::Data::ClearModified
     ::Data::ProcessRoads
 
@@ -1947,9 +1961,7 @@ proc ::Data::ReadMapData2 {fname} {
         }
         # R rid nodeid1 nodeid2 north distance south type "name" "comment"
         if {[string match "R *" $line]} {
-            foreach {. rid id1 id2 north dist south type name \
-                         comment xy survey} $line break
-
+            lassign $line . rid id1 id2 north dist south type name comment xy survey
             ::Data::ProcessOneRoad $rid $id1 $id2 $north $dist $south \
                 $type $name $comment $xy $survey
             continue
@@ -1972,6 +1984,10 @@ proc ::Data::ReadMapData2 {fname} {
         }
         if {[string match "E *" $line]} {
             ::Data::ProcessOneEmbellishment $line
+            continue
+        }
+        if {[string match "W *" $line]} {
+            ::Data::ProcessOneWpt $line
             continue
         }
         INFO "ERROR: can't parse ($lnum) $line"
@@ -2000,11 +2016,24 @@ proc ::Data::ProcessOneNode {nid name alt lat1 lat2 lat3 lon1 lon2 lon3 usgs} {
 #
 # Takes raw road data and puts it into our data structures, specifically
 # into roads()
-#   roads(##) : nid1 nid2 north dist south name comment xy z quality survey
+#   roads(##) : nid1 nid2 north dist south type name comment xy z quality survey wpts
 #
 # Quality: 0 perfect data; 1 one-way road data; 2 topo Z;
 #          3 endpoint delta; 4 no end point info
 #
+set R_nid1 0
+set R_nid2 1
+set R_north 2
+set R_dist 3
+set R_south 4
+set R_type 5
+set R_name 6
+set R_comment 7
+set R_xy 8
+set R_z 9
+set R_quality 10
+set R_survey 11
+set R_wpts 12
 proc ::Data::ProcessOneRoad {rid id1 id2 north dist south type name \
                                  comment xy survey} {
     global roads nodes state
@@ -2015,6 +2044,7 @@ proc ::Data::ProcessOneRoad {rid id1 id2 north dist south type name \
     }
     set xy2 {}
     set z {}
+    set wpts {}
     if {[lindex $xy 0] eq "xy"} {
         set xy2 [lrange $xy 1 end]
     } elseif {[lindex $xy 0] eq "xyz"} {
@@ -2022,19 +2052,27 @@ proc ::Data::ProcessOneRoad {rid id1 id2 north dist south type name \
             lappend xy2 $a $b $c $d $e $f
             lappend z $zz
         }
+    } elseif {[lindex $xy 0] eq "wpts"} {
+        set wpts [lrange $xy 1 end]
+        puts "KPV: $rid: got waypoints: [llength $xy]"
     }
 
     if {! [::Data::IsNorthNode $id1 $id2]} {    ;# id1 always north node
         foreach {id1 id2} [list $id2 $id1] break
         set xy2 [::Data::XYReverse $xy2]
-        set z [::Data::Reverse $z]
+        set z [lreverse $z]
+        set wpts [lreverse $wpts]
     }
     # Handle unknown and bad data
     set roads($rid) [list $id1 $id2 $north $dist $south $type \
-                            $name $comment $xy2 $z 0 $survey]
+                         $name $comment $xy2 $z 0 $survey $wpts]
+    if {$rid == "R575338061"} {puts "KPV ProcessOneRoad: $rid [llength $wpts]"}
+
     foreach {dist north south quality} [::Data::BadData $rid] break
+    if {$rid == "R575338061"} {puts "KPV ProcessOneRoad: $rid [llength $wpts]"}
     set roads($rid) [list $id1 $id2 $north $dist $south $type \
-                            $name $comment $xy2 $z $quality $survey]
+                            $name $comment $xy2 $z $quality $survey $wpts]
+    if {$rid == "R575338061"} {puts "KPV ProcessOneRoad: $rid [llength $wpts]"}
 
     ::Data::MarkModified road $rid
     if {! [info exists nodes($id1)] || ! [info exists nodes($id2)]} {
@@ -2501,6 +2539,7 @@ proc ::Data::ProcessRoads {{who {}}} {
     }
 
     foreach rid $who {
+        # nid1 nid2 north dist south name comment xy z quality survey wpts
         foreach {id1 id2 north dist south type . . . . q} $roads($rid) break
         if {! [info exists trails(type,$type)] && \
                 ! [info exists trails(user,$type)]} {
@@ -2526,6 +2565,38 @@ proc ::Data::ProcessRoads {{who {}}} {
         incr cnt
     }
     return $cnt
+}
+##+##########################################################################
+#
+# ::Data::ProcessWpts -- Converts all roads with WPTS from OSM into xy & z
+#
+proc ::Data::ProcessWpts {} {
+    global roads wpts
+
+    foreach rid [array names roads] {
+        set pts [lindex $roads($rid) $::R_wpts]
+        if {$pts eq {}} continue
+        puts "KPV: $rid  #[llength $pts]"
+        lassign [::Data::Wpts2XYZ $pts] xy z
+        lset roads($rid) $::R_xy $xy
+        lset roads($rid) $::R_z $z
+        lset roads($rid) $::R_wpts {}
+    }
+}
+##+##########################################################################
+#
+# ::Data::Wpts2XYZ -- Converts one set of WPTS from OSM into xy & z
+#
+proc ::Data::Wpts2XYZ {pts} {
+    global wpts
+    set xy {}
+    set z {}
+    foreach pt $pts {
+        lassign $wpts($pt) lat lon alt usgs
+        lappend xy $lat 0 0 $lon 0 0
+        lappend z $alt
+    }
+    return [list $xy $z]
 }
 ##+##########################################################################
 #
@@ -2567,9 +2638,10 @@ proc ::Data::XYZReverse {xyz} {
 # ::Data::Reverse -- reverses the z data (just list reverse)
 #
 proc ::Data::Reverse {z} {
-    set result {}
-    foreach zz $z { set result [concat [list $zz] $result] }
-    return $result
+    return [lreverse $z]
+    # set result {}
+    # foreach zz $z { set result [concat [list $zz] $result] }
+    # return $result
 }
 ##+##########################################################################
 #
@@ -2652,6 +2724,12 @@ proc ::Data::ProcessOnePhoto {line} {
 proc ::Data::ProcessOneEmbellishment {line} {
     foreach {. eid type ll options} $line break
     ::Embellishment::AddNew $eid $type $ll $options
+}
+proc ::Data::ProcessOneWpt {line} {
+    global wpts
+
+    lassign $line . wid lat lon alt usgs
+    set wpts($wid) [list $lat [expr {abs($lon)}] $alt $usgs]
 }
 ##+##########################################################################
 #
@@ -6041,7 +6119,7 @@ proc ::Display::DrawNodes {{who {}} {clip 1}} {
         ::Balloon::Create [list .c inode_$node] node $node
         .c bind inode_$node <Button-1> [list ::Display::PickRoad node $node]
         .c bind inode_$node <Double-Button-1> [list ::Edit::CreateNode $node]
-        .c bind inode_$node <Button-2> [list ::Route::ExtendRoute $node]
+        .c bind inode_$node <Control-Button-2> [list ::Route::ExtendRoute $node]
         .c bind inode_$node <<MenuMousePress>> \
             [list ::Display::DoPopupMenu %x %y node $node]
     }
@@ -8730,6 +8808,7 @@ proc WRAPUNIX {txt} {
 # into a junk window.
 #
 proc Busy {onoff} {
+    return ;# KPV
     destroy .grabber
     if {$onoff} {
         . config -cursor watch                  ;# Doing a long operation
@@ -19414,7 +19493,7 @@ proc ::Config::DefaultRC {} {
     set factory(dragGain) Slow          ;# 1 is pixel for pixel, 10 default
 
     # Calorie
-    set factory(calorie,human) [expr {$state(me) ? 205 : 175}]
+    set factory(calorie,human) [expr {$state(me) ? 190 : 175}]
     set factory(calorie,bike) 25
     set factory(calorie,position) "Crouch"
     set factory(calorie,temp,centigrade) 20
@@ -36252,3 +36331,43 @@ bad usgs lat/lon for elevation
   37 11 49.05 122 15 27.91
   37 11 54.5 122 15 26.96
   37 11 57.35 122 15 27.02
+
+
+set xy [.c coords roads_Xr128a]
+set xy [lassign $xy x0 y0]
+foreach {x1 y1} $xy {
+    set d [expr {hypot($x0 - $x1, $y0 - $y1)}]
+    puts "$d"
+    set x0 $x1
+    set y0 $y1
+}
+
+
+proc DistanceBetweenWpts {rid} {
+
+    foreach {id1 id2 north distance south type . . XY} $::roads($rid) break
+    foreach {name1 alt1 lat1 lon1 xy1} $::nodes($id1) break
+    foreach {name2 alt2 lat2 lon2 xy2} $::nodes($id2) break
+
+    foreach {x1 y1} $xy1 {x2 y2} $xy2 break
+
+    lassign $xy1 x0 y0
+    set idx 0
+    foreach {a1 a2 a3 b1 b2 b3} $XY {
+        incr idx
+        set lat [lat2int $a1 $a2 $a3]
+        set lon [lat2int $b1 $b2 $b3]
+
+        foreach {x y} [::Display::pos2canvas root $lat $lon] break
+        set d [expr {hypot($x0 - $x, $y0 - $y)}]
+        if {$d > 100} {
+            puts "$idx: $d => $a1 $a2 $a3 $b1 $b2 $b3"
+        } else {
+            puts "$idx: $d"
+        }
+        set x0 $x ; set y0 $y
+    }
+    incr idx
+    set d [expr {hypot($x0 - $x2, $y0 - $y2)}]
+    puts "$idx: $d"
+}

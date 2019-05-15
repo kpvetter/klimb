@@ -278,6 +278,14 @@ proc ::Zoom::GetRoadInfo {who} {
     ::Zoom::GuessDistance
     ::Zoom::GuessClimbing
 }
+proc ::Zoom::DeleteElev {} {
+    variable RINFO
+
+    for {set i 0} {$i < [llength $RINFO(pts)]} {incr i} {
+        lset RINFO(pts) $i 1 "?"
+    }
+    ::Klippy::DrawPoints
+}
 ##+##########################################################################
 #
 # ::Zoom::GetNodeInfo -- fills in RINFO w/ data about the node
@@ -779,6 +787,7 @@ proc ::Zoom::Save&Close {} {
     ::Zoom::USGSAllWaypoints
     ::Zoom::Save
     ::Save::SaveUserDataCmd 1
+    # KPV: getting missing window errors when called from a button binding
     ::Zoom::Close
     #puts "::Zoom::Save&Close: dist: $::Zoom::RINFO(dist) north: $::Zoom::RINFO(north) south: $::Zoom::RINFO(south)"
 }

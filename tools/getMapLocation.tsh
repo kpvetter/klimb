@@ -1,0 +1,51 @@
+#!/bin/sh
+# Restart with tcl: -*- mode: tcl; tab-width: 8; -*- \
+exec tclsh $0 ${1+"$@"}
+
+##+##########################################################################
+#
+# getMapLocation.tsh -- <description>
+# by Keith Vetter 2018-11-20
+#
+
+#package require Tk
+catch {wm withdraw .}
+
+
+proc pt {n} {
+    clip "$::pt($n,lat) -$::pt($n,lon)"
+}
+
+
+set iwidth 3400
+set iheight 2200
+
+set pt(0,x) 0
+set pt(0,y) 0
+set pt(3,x) $iwidth
+set pt(3,y) $iheight
+
+set pt(1,x) 635
+set pt(1,y) 182
+set pt(1,lat) 37.194775
+set pt(1,lon) 121.807377
+set pt(2,x) 2265
+set pt(2,y) 1267
+set pt(2,lat) 37.168050
+set pt(2,lon) 121.755630
+
+
+set dx [expr {$pt(2,x) - $pt(1,x)}]
+set dlon [expr {$pt(2,lon) - $pt(1,lon)}]
+set dy [expr {$pt(2,y) - $pt(1,y)}]
+set dlat [expr {$pt(2,lat) - $pt(1,lat)}]
+
+set pt(0,lon) [expr {$pt(1,lon) - $pt(1,x) * $dlon / $dx}]
+set pt(0,lon2) [expr {$pt(2,lon) - $pt(2,x) * $dlon / $dx}]
+set pt(0,lat) [expr {$pt(1,lat) - $pt(1,x) * $dlat / $dx}]
+set pt(0,lat2) [expr {$pt(2,lat) - $pt(2,x) * $dlat / $dx}]
+
+set pt(3,lon) [expr {$pt(2,lon) + ($pt(3,x) - $pt(2,x)) * $dlon / $dx}]
+set pt(3,lon2) [expr {$pt(1,lon) + ($pt(3,x) - $pt(1,x)) * $dlon / $dx}]
+set pt(3,lat) [expr {$pt(2,lat) + ($pt(3,x) - $pt(2,x)) * $dlon / $dx}]
+set pt(3,lat2) [expr {$pt(1,lat) + ($pt(3,x) - $pt(1,x)) * $dlon / $dx}]

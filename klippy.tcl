@@ -219,6 +219,8 @@ proc ::Klippy::DrawPoints {} {
                 [list ::Zoom::DoPopupMenu %x %y rtept $cnt]
             if {! $::Zoom::ZMAP(readonly)} {
                 $W bind $tag <Control-Button-2> \
+                    [list ::Zoom::DoPopupMenu %x %y add $cnt]
+                $W bind $tag <Control-Button-3> \
                     [list ::Zoom::DoPopupMenu %x %y delete $cnt]
                 $W bind $tag <Button-1> \
                     [list ::Zoom::MoveNode down $tag $cnt %x %y]
@@ -262,8 +264,10 @@ proc ::Klippy::DrawPoints {} {
     } else {
         $W bind road <<MenuMousePress>> {::Zoom::DoPopupMenu %x %y road; break}
         if {! $::Zoom::ZMAP(readonly)} {
-            $W bind road <Control-Button-3> {::Zoom::DoPopupMenu %x %y add; break}
-            $W bind img <Control-Button-3> {::Zoom::DoPopupMenu %x %y add; break}
+            # $W bind road <Control-Button-3> {::Zoom::DoPopupMenu %x %y add; break}
+            # $W bind img <Control-Button-3> {::Zoom::DoPopupMenu %x %y add; break}
+            $W bind road <Control-Button-2> {::Zoom::DoPopupMenu %x %y add; break}
+            $W bind img <Control-Button-2> {::Zoom::DoPopupMenu %x %y add; break}
             $W bind rtept <Enter> [list $W config -cursor hand2]
             $W bind rtept <Leave> [list $W config -cursor {}]
         }

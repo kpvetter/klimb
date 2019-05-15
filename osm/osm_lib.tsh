@@ -1,0 +1,166 @@
+#!/bin/sh
+# Restart with tcl: -*- mode: tcl; tab-width: 8; -*- \
+exec tclsh $0 ${1+"$@"}
+
+##+##########################################################################
+#
+# osm_lib.tsh -- Handles extracting OSM data from a big XML file
+# by Keith Vetter 2018-11-23
+#
+
+# ::osmlib::NewSiteDom xmlFile
+# ::osmlib::FilteredRoads dom filters
+# ::osmlib::Bounds dom
+# ::osmlib::AllNodeRefs dom wayId
+
+package require tdom
+
+set wayId 25083341
+
+namespace eval ::osmlib {
+
+}
+proc ::osmlib::NewSiteDom {xmlFile} {
+    set rawXML [::tDOM::xmlReadFile $xmlFile] ; list
+    set dom [::dom parse $rawXML]
+    return $dom
+}
+
+proc ::osmlib::_OneSelectNodes {dom xpath} {
+    set nodes [$dom selectNodes $xpath]
+    if {[llength $nodes] != 1} {error "bad xpath '$xpath'"}
+    return [lindex $nodes 0]
+}
+
+proc ::osmlib::_AllRoads {dom key value arg} {
+    # puts "KPV: ::osmlib::_AllRoads $key $value '$arg'"
+    if {$key eq "id" && $value eq "contains"} {
+        #   <way id="38790337" ...>
+        set xpath "//way\[contains(@id,'$arg')\]"
+        set ways [$dom selectNodes $xpath]
+    } elseif {$key eq "name" && $value eq "contains"} {
+        set xpath "//way/tag\[@k='name' and contains(@v,'$arg')\]"
+        set tags [$dom selectNodes $xpath]
+        set ways [lmap tag $tags {$tag ancestor 1}]
+        # puts "KPV: contains $value : $xpath : [llength $tags]"
+    } elseif {$key eq "name" && $value eq "nonempty"} {
+        set xpath "//way/tag\[@k='name'\]"
+        set tags [$dom selectNodes $xpath]
+        set ways [lmap tag $tags {$tag ancestor 1}]
+        # puts "KPV: nonempty : $xpath : [llength $tags]"
+    } elseif {$key ne ""} {
+        set xpath "//way/tag\[@k='${key}' and @v='${value}'\]"
+        set tags [$dom selectNodes $xpath]
+        set ways [lmap tag $tags {$tag ancestor 1}]
+    } else {
+        set xpath "//way"
+        set ways [$dom selectNodes $xpath]
+    }
+
+    set result [dict create]
+    foreach way $ways {
+        set meta [::osmlib::_ExtractMeta $way]
+        set wayId [dict get $meta attr id]
+        dict set meta way $way
+        dict set meta nodeCount [llength [AllNodeRefs $dom $wayId]]
+        dict set result $wayId $meta
+    }
+    return $result
+}
+proc ::osmlib::FilteredRoads {dom filters} {
+
+    if {$filters eq {}} { return [::osmlib::_AllRoads $dom "" "" ""] }
+
+    set all [dict create]
+    foreach filter $filters {
+        lassign $filter key value arg
+        set nodes [::osmlib::_AllRoads $dom $key $value $arg]
+        set all [dict merge $all $nodes]
+    }
+    return $all
+}
+proc ::osmlib::Bounds {dom} {
+    set xpath "//bounds"
+    set node [::osmlib::_OneSelectNodes $dom $xpath]
+
+    set result {}
+    foreach attr {minlat minlon maxlat maxlon} {
+        lappend result [$node getAttribute $attr]
+    }
+    return $result
+}
+
+
+proc ::osmlib::AllNodeRefs {dom wayId} {
+    # Returns all nodes which are part of wayId
+    set xpath "//way\[@id=${wayId}\]/nd"
+    set nds [$dom selectNodes $xpath]
+    set refs [lmap nd $nds {$nd getAttribute ref}]
+    return $refs
+}
+
+proc ::osmlib::AllNodeLatLon {dom nds} {
+    # Returns the lat/lon for all nodes in list nds
+    set result {}
+    foreach id $nds {
+        set xpath "//node\[@id='$id'\]"
+        set node [::osmlib::_OneSelectNodes $dom $xpath]
+        set lat [$node getAttribute lat]
+        set lon [$node getAttribute lon]
+        lappend result [list $id $lat $lon]
+    }
+    return $result
+}
+
+proc ::osmlib::AllRoadsWithNode {dom nodeId} {
+    set xpath "//nd\[@ref='${nodeId}'\]"
+    set ways [$dom selectNodes $xpath]
+    set way [[lindex $ways 0] parent]
+
+proc ::osmlib::_ExtractMeta {node} {
+    return [dict create attr [::osmlib::_ExtractAttr $node] tags [::osmlib::_ExtractTags $node]]
+}
+proc ::osmlib::_ExtractAttr {node} {
+    set attr [dict create]
+    foreach key [$node attributes] {
+        dict set attr $key [$node getAttribute $key]
+    }
+    return $attr
+}
+proc ::osmlib::_ExtractTags {node} {
+    set tdom [dom parse [$node asXML]]
+    set tags [dict create]
+    foreach node [$tdom selectNodes //tag] {
+        dict set tags [$node getAttribute k] [$node getAttribute v]
+    }
+    return $tags
+}
+proc ::osmlib::UniqueTagAttributes {dom attr} {
+    if {$dom eq ""} { return {}}
+    set xpath //way/tag\[@k='${attr}'\]
+    set nodes [$dom selectNodes $xpath]
+    set unique {}
+    foreach node $nodes {
+        lappend unique [$node getAttribute v]
+    }
+    return [lsort -unique $unique]
+}
+
+################################################################
+return
+set dom $S(osm,dom)
+set xpath //way/tag
+set nodes [$dom selectNodes $xpath]
+
+unset -nocomplain TAGS
+foreach node $nodes {
+    set k [$node getAttribute k]
+    set v [$node getAttribute v]
+    lappend TAGS($k) $v
+}
+set l {}
+foreach key [array names TAGS] {
+    set values [lsort -unique $TAGS($key)]
+    lappend l [list $key [llength $values]]
+}
+set l [lsort -index 1 -integer $l]
